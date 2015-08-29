@@ -60,3 +60,11 @@ func (w *worldState) Partitions(topicName string) int {
 func (w *worldState) Terminate() {
 	atomic.StoreInt32(w.quit, 1)
 }
+
+func (w *worldState) IsClaimed(topic string, partId int) bool {
+	return false
+}
+
+func (w *worldState) ClaimPartition(topic string, partId int) (bool, error) {
+	return false, nil
+}

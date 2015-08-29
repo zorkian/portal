@@ -37,31 +37,31 @@ type message interface {
 func Decode(inp []byte) (message, error) {
 	parts := strings.Split(string(inp), "/")
 	if len(parts) < 5 {
-		return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
+		return nil, errors.New(fmt.Sprintf("Invalid message 1: [%s]", string(inp)))
 	}
 
 	// Get out the base message which is always present as it identifies the sender.
 	partId, err := strconv.Atoi(parts[4])
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
+		return nil, errors.New(fmt.Sprintf("Invalid message 2: [%s]", string(inp)))
 	}
 	base := msgBase{
-		clientId: parts[1],
-		groupId:  parts[2],
-		topic:    parts[3],
-		partId:   partId,
+		ClientId: parts[1],
+		GroupId:  parts[2],
+		Topic:    parts[3],
+		PartId:   partId,
 	}
 
 	switch parts[0] {
 	case "Heartbeat":
 		if len(parts) != 6 {
-			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
+			return nil, errors.New(fmt.Sprintf("Invalid message 3: [%s]", string(inp)))
 		}
 		offset, err := strconv.Atoi(parts[5])
 		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
+			return nil, errors.New(fmt.Sprintf("Invalid message 4: [%s]", string(inp)))
 		}
-		return &msgHeartbeat{msgBase: base, lastOffset: offset}, nil
+		return &msgHeartbeat{msgBase: base, LastOffset: offset}, nil
 	case "ClaimingPartition":
 		if len(parts) != 5 {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
@@ -80,21 +80,21 @@ func Decode(inp []byte) (message, error) {
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
-		return &msgClaimingMessages{msgBase: base, proposedLastOffset: offset}, nil
+		return &msgClaimingMessages{msgBase: base, ProposedLastOffset: offset}, nil
 	}
 	return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 }
 
 type msgBase struct {
-	clientId string
-	groupId  string
-	topic    string
-	partId   int
+	ClientId string
+	GroupId  string
+	Topic    string
+	PartId   int
 }
 
 // Encode returns a string representation of the message.
 func (m *msgBase) Encode() string {
-	return fmt.Sprintf("%s/%s/%s/%d", m.clientId, m.groupId, m.topic, m.partId)
+	return fmt.Sprintf("%s/%s/%s/%d", m.ClientId, m.GroupId, m.Topic, m.PartId)
 }
 
 // Type returns the type of this message.
@@ -106,12 +106,12 @@ func (m *msgBase) Type() {
 // they're consuming.
 type msgHeartbeat struct {
 	msgBase
-	lastOffset int
+	LastOffset int
 }
 
 // Encode returns a string representation of the message.
 func (m *msgHeartbeat) Encode() string {
-	return "Heartbeat/" + m.msgBase.Encode() + fmt.Sprintf("/%d", m.lastOffset)
+	return "Heartbeat/" + m.msgBase.Encode() + fmt.Sprintf("/%d", m.LastOffset)
 }
 
 // Type returns the type of this message.
@@ -138,12 +138,12 @@ func (m *msgClaimingPartition) Type() msgType {
 // a partition.
 type msgReleasingPartition struct {
 	msgBase
-	lastOffset int
+	LastOffset int
 }
 
 // Encode returns a string representation of the message.
 func (m *msgReleasingPartition) Encode() string {
-	return "ReleasingPartition/" + m.msgBase.Encode() + fmt.Sprintf("/%d", m.lastOffset)
+	return "ReleasingPartition/" + m.msgBase.Encode() + fmt.Sprintf("/%d", m.LastOffset)
 }
 
 // Type returns the type of this message.
@@ -155,12 +155,12 @@ func (m *msgReleasingPartition) Type() msgType {
 // advisory message.
 type msgClaimingMessages struct {
 	msgBase
-	proposedLastOffset int
+	ProposedLastOffset int
 }
 
 // Encode returns a string representation of the message.
 func (m *msgClaimingMessages) Encode() string {
-	return "ClaimingMessages/" + m.msgBase.Encode() + fmt.Sprintf("/%d", m.proposedLastOffset)
+	return "ClaimingMessages/" + m.msgBase.Encode() + fmt.Sprintf("/%d", m.ProposedLastOffset)
 }
 
 // Type returns the type of this message.

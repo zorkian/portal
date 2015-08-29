@@ -34,6 +34,17 @@ var log = logging.MustGetLogger("PortalMarshal")
 type Marshaler interface {
 	Topics() []string
 	Partitions(string) int
+	Terminate()
+
+	// IsClaimed returns whether or not a given topic/partition is presently believed to be
+	// claimed. Note that the only safe operation to perform with this information is to call
+	// ClaimPartition which might fail.
+	IsClaimed(topic string, partId int) bool
+
+	// ClaimPartition will attempt to claim a partition. If this returns in the affirmative,
+	// then you may proceed with processing messages from the given partition as long as you
+	// continue to heartbeat.
+	ClaimPartition(topic string, partId int) (bool, error)
 }
 
 // NewMarshaler connects to a cluster (given broker addresses) and prepares to handle marshalling
@@ -49,6 +60,7 @@ func NewMarshaler(clientId, groupId string, brokers []string) (Marshaler, error)
 		return nil, err
 	}
 	ws := &worldState{
+		quit:     new(int32),
 		clientId: clientId,
 		groupId:  groupId,
 		kafka:    kfka,

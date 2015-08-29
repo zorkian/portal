@@ -15,7 +15,7 @@ func MakeTopic(srv *kafkatest.Server, topic string, numPartitions int) {
 func StartServer() *kafkatest.Server {
 	srv := kafkatest.NewServer()
 	srv.MustSpawn()
-	MakeTopic(srv, "__marshal", 4)
+	MakeTopic(srv, MARSHAL_TOPIC, 4)
 	MakeTopic(srv, "test1", 1)
 	MakeTopic(srv, "test16", 16)
 	return srv
@@ -28,8 +28,9 @@ func TestNewMarshaler(t *testing.T) {
 	if err != nil {
 		t.Errorf("New failed: %s", err)
 	}
+	defer m.Terminate()
 
-	ct := m.Partitions("__marshal")
+	ct := m.Partitions(MARSHAL_TOPIC)
 	if ct != 4 {
 		t.Error("Expected 4 partitions got", ct)
 	}
