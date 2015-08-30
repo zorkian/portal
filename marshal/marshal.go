@@ -10,7 +10,6 @@ package marshal
 
 import (
 	"errors"
-	"time"
 
 	"github.com/op/go-logging"
 	"github.com/optiopay/kafka"
@@ -24,7 +23,7 @@ const (
 	// This is the main timing used to determine how "chatty" the system is and how fast it
 	// responds to failures of consumers. THIS VALUE MUST BE THE SAME BETWEEN ALL CONSUMERS
 	// as it is critical to coordination.
-	HEARTBEAT_INTERVAL = 1 * time.Second
+	HEARTBEAT_INTERVAL = 60 // Measured in seconds.
 )
 
 var log = logging.MustGetLogger("PortalMarshal")

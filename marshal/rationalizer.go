@@ -69,16 +69,44 @@ func (w *worldState) kafkaConsumerChannel(partId int) <-chan message {
 	return out
 }
 
+// updateClaim is called whenever we need to adjust a claim structure.
+func (w *worldState) updateClaim(msg *msgHeartbeat) {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	topic, ok := w.topics[msg.Topic]
+	if !ok {
+		log.Warning("Claim received for unknown topic/partition. Metadata stale?")
+		topic = &topicState{
+			// This creates as many partitions as we know they want, but this is possibly not
+			// going to be enough... it works for now at least.
+			partitions: make([]partitionState, msg.PartId+1),
+		}
+		w.topics[msg.Topic] = topic
+	}
+
+	topic.lock.Lock()
+	defer topic.lock.Unlock()
+
+	topic.partitions[msg.PartId].clientId = msg.ClientId
+	topic.partitions[msg.PartId].groupId = msg.GroupId
+	topic.partitions[msg.PartId].lastOffset = msg.LastOffset
+	topic.partitions[msg.PartId].lastHeartbeat = int64(msg.Time)
+}
+
 // rationalize is a goroutine that constantly consumes from a given partition of the marshal
 // topic and makes changes to the world state whenever something happens.
 func (w *worldState) rationalize(partId int, in <-chan message) { // Might be in over my head.
 	for {
 		msg, ok := <-in
 		if !ok {
-			log.Info("rationalize[%d]: channel closed.", partId)
+			log.Debug("rationalize[%d]: channel closed.", partId)
 			return
 		}
+		log.Debug("rationalize[%d]: %s", partId, msg.Encode())
 
-		log.Info("rationalize[%d]: received: %s", partId, msg.Encode())
+		if msg.Type() == MsgHeartbeat {
+			w.updateClaim(msg.(*msgHeartbeat))
+		}
 	}
 }
