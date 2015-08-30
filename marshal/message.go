@@ -36,47 +36,52 @@ type message interface {
 // decode it into one of our message structs.
 func Decode(inp []byte) (message, error) {
 	parts := strings.Split(string(inp), "/")
-	if len(parts) < 5 {
-		return nil, errors.New(fmt.Sprintf("Invalid message 1: [%s]", string(inp)))
+	if len(parts) < 6 {
+		return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 	}
 
 	// Get out the base message which is always present as it identifies the sender.
-	partId, err := strconv.Atoi(parts[4])
+	partId, err := strconv.Atoi(parts[5])
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Invalid message 2: [%s]", string(inp)))
+		return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
+	}
+	ts, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 	}
 	base := msgBase{
-		ClientId: parts[1],
-		GroupId:  parts[2],
-		Topic:    parts[3],
+		Time:     ts,
+		ClientId: parts[2],
+		GroupId:  parts[3],
+		Topic:    parts[4],
 		PartId:   partId,
 	}
 
 	switch parts[0] {
 	case "Heartbeat":
-		if len(parts) != 6 {
-			return nil, errors.New(fmt.Sprintf("Invalid message 3: [%s]", string(inp)))
+		if len(parts) != 7 {
+			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
-		offset, err := strconv.Atoi(parts[5])
+		offset, err := strconv.Atoi(parts[6])
 		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Invalid message 4: [%s]", string(inp)))
+			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
 		return &msgHeartbeat{msgBase: base, LastOffset: offset}, nil
 	case "ClaimingPartition":
-		if len(parts) != 5 {
+		if len(parts) != 6 {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
 		return &msgClaimingPartition{msgBase: base}, nil
 	case "ReleasingPartition":
-		if len(parts) != 5 {
+		if len(parts) != 6 {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
 		return &msgReleasingPartition{msgBase: base}, nil
 	case "ClaimingMessages":
-		if len(parts) != 6 {
+		if len(parts) != 7 {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
-		offset, err := strconv.Atoi(parts[5])
+		offset, err := strconv.Atoi(parts[6])
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
@@ -86,6 +91,7 @@ func Decode(inp []byte) (message, error) {
 }
 
 type msgBase struct {
+	Time     int
 	ClientId string
 	GroupId  string
 	Topic    string
@@ -94,7 +100,7 @@ type msgBase struct {
 
 // Encode returns a string representation of the message.
 func (m *msgBase) Encode() string {
-	return fmt.Sprintf("%s/%s/%s/%d", m.ClientId, m.GroupId, m.Topic, m.PartId)
+	return fmt.Sprintf("%d/%s/%s/%s/%d", m.Time, m.ClientId, m.GroupId, m.Topic, m.PartId)
 }
 
 // Type returns the type of this message.
