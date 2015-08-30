@@ -15,7 +15,7 @@ import (
 	"github.com/optiopay/kafka"
 )
 
-// worldState is the main structure where we store informatio about the state of all of the
+// worldState is the main structure where we store information about the state of all of the
 // consumers and partitions.
 type worldState struct {
 	quit     *int32

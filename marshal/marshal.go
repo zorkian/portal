@@ -47,6 +47,10 @@ type Marshaler interface {
 	ClaimPartition(topic string, partId int) (bool, error)
 }
 
+func init() {
+	logging.SetLevel(logging.WARNING, "PortalMarshal")
+}
+
 // NewMarshaler connects to a cluster (given broker addresses) and prepares to handle marshalling
 // requests.
 // TODO: It might be nice to make the marshaler agnostic of clients and able to support
@@ -83,8 +87,8 @@ func NewMarshaler(clientId, groupId string, brokers []string) (Marshaler, error)
 		ws.topics[topic.Name] = &topicState{
 			partitions: make([]partitionState, len(topic.Partitions)),
 		}
-		log.Debug("Discovered: Topic %s has %d partitions.",
-			topic.Name, len(topic.Partitions))
+		//log.Debug("Discovered: Topic %s has %d partitions.",
+		//	topic.Name, len(topic.Partitions))
 	}
 
 	// If there is no marshal topic, then we can't run. The admins must go create the topic
@@ -97,7 +101,7 @@ func NewMarshaler(clientId, groupId string, brokers []string) (Marshaler, error)
 	// topic. Note that this doesn't handle increasing the partition count on that topic
 	// without stopping all consumers.
 	for id := 0; id < foundMarshal; id++ {
-		go ws.rationalize(id)
+		go ws.rationalize(id, ws.kafkaConsumerChannel(id))
 	}
 
 	return ws, nil
