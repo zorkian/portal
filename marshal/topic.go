@@ -16,14 +16,13 @@ import (
 type topicState struct {
 	// This lock also protects the contenst of the partitions.
 	lock       sync.RWMutex
-	partitions []partitionState
+	partitions []PartitionClaim
 }
 
-// partitionState contains information about a given partition. NB: You must have the topic lock
-// to operate on a partition within the topic.
-type partitionState struct {
-	lastHeartbeat int64
-	lastOffset    int
-	clientId      string
-	groupId       string
+// PartitionClaim contains claim information about a given partition.
+type PartitionClaim struct {
+	LastHeartbeat int64
+	LastOffset    int
+	ClientId      string
+	GroupId       string
 }

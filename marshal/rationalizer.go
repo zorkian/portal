@@ -80,7 +80,7 @@ func (w *worldState) updateClaim(msg *msgHeartbeat) {
 		topic = &topicState{
 			// This creates as many partitions as we know they want, but this is possibly not
 			// going to be enough... it works for now at least.
-			partitions: make([]partitionState, msg.PartId+1),
+			partitions: make([]PartitionClaim, msg.PartId+1),
 		}
 		w.topics[msg.Topic] = topic
 	}
@@ -88,10 +88,43 @@ func (w *worldState) updateClaim(msg *msgHeartbeat) {
 	topic.lock.Lock()
 	defer topic.lock.Unlock()
 
-	topic.partitions[msg.PartId].clientId = msg.ClientId
-	topic.partitions[msg.PartId].groupId = msg.GroupId
-	topic.partitions[msg.PartId].lastOffset = msg.LastOffset
-	topic.partitions[msg.PartId].lastHeartbeat = int64(msg.Time)
+	// Note that a heartbeat will just set the claim structure. It's not valid to heartbeat
+	// for something you don't own (which is why we have ClaimPartition as a separate
+	// message), so we can only assume it's valid.
+
+	topic.partitions[msg.PartId].ClientId = msg.ClientId
+	topic.partitions[msg.PartId].GroupId = msg.GroupId
+	topic.partitions[msg.PartId].LastOffset = msg.LastOffset
+	topic.partitions[msg.PartId].LastHeartbeat = int64(msg.Time)
+}
+
+// releaseClaim is called whenever someone has released their claim on a partition.
+func (w *worldState) releaseClaim(msg *msgReleasingPartition) {
+	w.lock.Lock()
+	defer w.lock.Unlock()
+
+	topic, ok := w.topics[msg.Topic]
+	if !ok {
+		// In this particular case, we didn't know about the topic so we didn't know it
+		// was claimed anyway. We can just return.
+		log.Warning("Release received for unknown topic/partition. Bad client?")
+		return
+	}
+
+	topic.lock.Lock()
+	defer topic.lock.Unlock()
+
+	// The partition must be claimed by the person releasing it
+	if topic.partitions[msg.PartId].ClientId != msg.ClientId ||
+		topic.partitions[msg.PartId].GroupId != msg.GroupId {
+		log.Warning("ReleasePartition message from client that doesn't own it. Dropping.")
+		return
+	}
+
+	// Record the offset they told us they last processed, and then set the heartbeat to 0
+	// which means this is no longer claimed
+	topic.partitions[msg.PartId].LastOffset = msg.LastOffset
+	topic.partitions[msg.PartId].LastHeartbeat = 0
 }
 
 // rationalize is a goroutine that constantly consumes from a given partition of the marshal
@@ -105,8 +138,15 @@ func (w *worldState) rationalize(partId int, in <-chan message) { // Might be in
 		}
 		log.Debug("rationalize[%d]: %s", partId, msg.Encode())
 
-		if msg.Type() == MsgHeartbeat {
+		switch msg.Type() {
+		case msgTypeHeartbeat:
 			w.updateClaim(msg.(*msgHeartbeat))
+		case msgTypeClaimingPartition:
+			// TODO: Implement.
+		case msgTypeReleasingPartition:
+			w.releaseClaim(msg.(*msgReleasingPartition))
+		case msgTypeClaimingMessages:
+			// TODO: Implement.
 		}
 	}
 }

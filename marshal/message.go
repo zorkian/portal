@@ -21,10 +21,10 @@ import (
 type msgType int
 
 const (
-	MsgHeartbeat          msgType = iota
-	MsgClaimingPartition  msgType = iota
-	MsgReleasingPartition msgType = iota
-	MsgClaimingMessages   msgType = iota
+	msgTypeHeartbeat          msgType = iota
+	msgTypeClaimingPartition  msgType = iota
+	msgTypeReleasingPartition msgType = iota
+	msgTypeClaimingMessages   msgType = iota
 )
 
 type message interface {
@@ -122,7 +122,7 @@ func (m *msgHeartbeat) Encode() string {
 
 // Type returns the type of this message.
 func (m *msgHeartbeat) Type() msgType {
-	return MsgHeartbeat
+	return msgTypeHeartbeat
 }
 
 // msgClaimingPartition is used in the claim flow.
@@ -137,7 +137,7 @@ func (m *msgClaimingPartition) Encode() string {
 
 // Type returns the type of this message.
 func (m *msgClaimingPartition) Type() msgType {
-	return MsgClaimingPartition
+	return msgTypeClaimingPartition
 }
 
 // msgReleasingPartition is used in a controlled shutdown to indicate that you are done with
@@ -154,7 +154,7 @@ func (m *msgReleasingPartition) Encode() string {
 
 // Type returns the type of this message.
 func (m *msgReleasingPartition) Type() msgType {
-	return MsgReleasingPartition
+	return msgTypeReleasingPartition
 }
 
 // msgClaimingMessages is used for at-most-once consumption semantics, this is a pre-commit
@@ -171,5 +171,5 @@ func (m *msgClaimingMessages) Encode() string {
 
 // Type returns the type of this message.
 func (m *msgClaimingMessages) Type() msgType {
-	return MsgClaimingMessages
+	return msgTypeClaimingMessages
 }

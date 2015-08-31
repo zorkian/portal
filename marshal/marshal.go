@@ -40,6 +40,11 @@ type Marshaler interface {
 	// ClaimPartition which might fail.
 	IsClaimed(topic string, partId int) bool
 
+	// GetPartitionClaim returns a PartitionClaim struct, which contains information about
+	// a particular partition. If the partition is not presently claimed by any consumer,
+	// the LastHeartbeat field will be 0.
+	GetPartitionClaim(topic string, partId int) PartitionClaim
+
 	// ClaimPartition will attempt to claim a partition. If this returns in the affirmative,
 	// then you may proceed with processing messages from the given partition as long as you
 	// continue to heartbeat.
@@ -84,7 +89,7 @@ func NewMarshaler(clientId, groupId string, brokers []string) (Marshaler, error)
 			foundMarshal = len(topic.Partitions)
 		}
 		ws.topics[topic.Name] = &topicState{
-			partitions: make([]partitionState, len(topic.Partitions)),
+			partitions: make([]PartitionClaim, len(topic.Partitions)),
 		}
 		//log.Debug("Discovered: Topic %s has %d partitions.",
 		//	topic.Name, len(topic.Partitions))

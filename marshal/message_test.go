@@ -65,7 +65,7 @@ func TestMessageDecode(t *testing.T) {
 		t.Error("Expected msg, got error", err)
 	}
 	mhb, ok := msg.(*msgHeartbeat)
-	if !ok || msg.Type() != MsgHeartbeat || mhb.ClientId != "cl" || mhb.GroupId != "gr" ||
+	if !ok || msg.Type() != msgTypeHeartbeat || mhb.ClientId != "cl" || mhb.GroupId != "gr" ||
 		mhb.Topic != "t" || mhb.PartId != 1 || mhb.LastOffset != 2 || mhb.Time != 2 {
 		t.Error("Heartbeat message contents invalid")
 	}
@@ -75,7 +75,7 @@ func TestMessageDecode(t *testing.T) {
 		t.Error("Expected msg, got error", err)
 	}
 	mcp, ok := msg.(*msgClaimingPartition)
-	if !ok || msg.Type() != MsgClaimingPartition || mcp.ClientId != "cl" ||
+	if !ok || msg.Type() != msgTypeClaimingPartition || mcp.ClientId != "cl" ||
 		mcp.GroupId != "gr" || mcp.Topic != "t" || mcp.PartId != 1 || mcp.Time != 2 {
 		t.Error("ClaimingPartition message contents invalid")
 	}
@@ -85,7 +85,7 @@ func TestMessageDecode(t *testing.T) {
 		t.Error("Expected msg, got error", err)
 	}
 	mrp, ok := msg.(*msgReleasingPartition)
-	if !ok || msg.Type() != MsgReleasingPartition || mrp.ClientId != "cl" ||
+	if !ok || msg.Type() != msgTypeReleasingPartition || mrp.ClientId != "cl" ||
 		mrp.GroupId != "gr" || mrp.Topic != "t" || mrp.PartId != 1 || mrp.Time != 2 {
 		t.Error("ReleasingPartition message contents invalid")
 	}
@@ -95,7 +95,7 @@ func TestMessageDecode(t *testing.T) {
 		t.Error("Expected msg, got error", err)
 	}
 	mcm, ok := msg.(*msgClaimingMessages)
-	if !ok || msg.Type() != MsgClaimingMessages || mcm.ClientId != "cl" || mcm.GroupId != "gr" ||
+	if !ok || msg.Type() != msgTypeClaimingMessages || mcm.ClientId != "cl" || mcm.GroupId != "gr" ||
 		mcm.Topic != "t" || mcm.PartId != 1 || mcm.ProposedLastOffset != 2 || mcm.Time != 2 {
 		t.Error("ClaimingMessages message contents invalid")
 	}
