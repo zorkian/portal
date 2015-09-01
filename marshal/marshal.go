@@ -45,12 +45,13 @@ func NewMarshaler(clientId, groupId string, brokers []string) (*MarshalState, er
 		return nil, err
 	}
 	ws := &MarshalState{
-		quit:     new(int32),
-		clientId: clientId,
-		groupId:  groupId,
-		kafka:    kfka,
-		topics:   make(map[string]int),
-		groups:   make(map[string]map[string]*topicState),
+		quit:          new(int32),
+		clientId:      clientId,
+		groupId:       groupId,
+		kafka:         kfka,
+		kafkaProducer: kfka.Producer(kafka.NewProducerConf()),
+		topics:        make(map[string]int),
+		groups:        make(map[string]map[string]*topicState),
 	}
 	ws.lock.Lock() // Probably not strictly necessary.
 	defer ws.lock.Unlock()

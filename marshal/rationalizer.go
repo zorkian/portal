@@ -71,38 +71,14 @@ func (w *MarshalState) kafkaConsumerChannel(partId int) <-chan message {
 
 // updateClaim is called whenever we need to adjust a claim structure.
 func (w *MarshalState) updateClaim(msg *msgHeartbeat) {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-
-	group, ok := w.groups[msg.GroupId]
-	if !ok {
-		group = make(map[string]*topicState)
-		w.groups[msg.GroupId] = group
-	}
-
-	topic, ok := group[msg.Topic]
-	if !ok {
-		topic = &topicState{
-			partitions: make([]PartitionClaim, msg.PartId+1),
-		}
-		group[msg.Topic] = topic
-	}
+	topic := w.getTopicState(msg.Topic, msg.PartId)
 
 	topic.lock.Lock()
 	defer topic.lock.Unlock()
 
-	// They might be referring to a partition we don't know about, so let's extend our data
-	// structure if so.
-	if len(topic.partitions) < msg.PartId+1 {
-		for i := len(topic.partitions); i <= msg.PartId; i++ {
-			topic.partitions = append(topic.partitions, PartitionClaim{})
-		}
-	}
-
 	// Note that a heartbeat will just set the claim structure. It's not valid to heartbeat
 	// for something you don't own (which is why we have ClaimPartition as a separate
 	// message), so we can only assume it's valid.
-
 	topic.partitions[msg.PartId].ClientId = msg.ClientId
 	topic.partitions[msg.PartId].GroupId = msg.GroupId
 	topic.partitions[msg.PartId].LastOffset = msg.LastOffset
@@ -111,22 +87,7 @@ func (w *MarshalState) updateClaim(msg *msgHeartbeat) {
 
 // releaseClaim is called whenever someone has released their claim on a partition.
 func (w *MarshalState) releaseClaim(msg *msgReleasingPartition) {
-	w.lock.Lock()
-	defer w.lock.Unlock()
-
-	group, ok := w.groups[msg.GroupId]
-	if !ok {
-		log.Warning("Release received for unknown group.")
-		return
-	}
-
-	topic, ok := group[msg.Topic]
-	if !ok {
-		// In this particular case, we didn't know about the topic so we didn't know it
-		// was claimed anyway. We can just return.
-		log.Warning("Release received for unknown topic/partition. Bad client?")
-		return
-	}
+	topic := w.getTopicState(msg.Topic, msg.PartId)
 
 	topic.lock.Lock()
 	defer topic.lock.Unlock()
@@ -144,6 +105,55 @@ func (w *MarshalState) releaseClaim(msg *msgReleasingPartition) {
 	topic.partitions[msg.PartId].LastHeartbeat = 0
 }
 
+// handleClaim is called whenever we see a ClaimPartition message.
+func (w *MarshalState) handleClaim(msg *msgClaimingPartition) {
+	topic := w.getTopicState(msg.Topic, msg.PartId)
+
+	topic.lock.Lock()
+	defer topic.lock.Unlock()
+
+	// Send message to all pending consumers then clear the list (it is a violation of the
+	// protocol to send two responses)
+	fireEvents := func(evt bool) {
+		for _, out := range topic.partitions[msg.PartId].pendingClaims {
+			out <- evt
+		}
+		topic.partitions[msg.PartId].pendingClaims = nil
+	}
+
+	// Claim logic: if the claim is for an already claimed partition, we can end now and decide
+	// whether or not to fire.
+	if topic.partitions[msg.PartId].isClaimed(w.ts) {
+		// The ClaimPartition message needs to be from us, or we should just return
+		if msg.ClientId == w.clientId && msg.GroupId == w.groupId {
+			// Now determine if we own the partition claim and let us know whether we do
+			// or not
+			if topic.partitions[msg.PartId].ClientId == w.clientId &&
+				topic.partitions[msg.PartId].GroupId == w.groupId {
+				fireEvents(true)
+			} else {
+				fireEvents(false)
+			}
+		}
+		return
+	}
+
+	// At this point, the partition is unclaimed, which means we know we have the first
+	// ClaimPartition message. As soon as we get it, we fill in the structure which makes
+	// us think it's claimed (it is).
+	topic.partitions[msg.PartId].ClientId = msg.ClientId
+	topic.partitions[msg.PartId].GroupId = msg.GroupId
+	topic.partitions[msg.PartId].LastOffset = 0 // not present in this message, reset.
+	topic.partitions[msg.PartId].LastHeartbeat = int64(msg.Time)
+
+	// Now we can advise that this partition has been handled
+	if msg.ClientId == w.clientId && msg.GroupId == w.groupId {
+		fireEvents(true)
+	} else {
+		fireEvents(true)
+	}
+}
+
 // rationalize is a goroutine that constantly consumes from a given partition of the marshal
 // topic and makes changes to the world state whenever something happens.
 func (w *MarshalState) rationalize(partId int, in <-chan message) { // Might be in over my head.
@@ -159,7 +169,7 @@ func (w *MarshalState) rationalize(partId int, in <-chan message) { // Might be 
 		case msgTypeHeartbeat:
 			w.updateClaim(msg.(*msgHeartbeat))
 		case msgTypeClaimingPartition:
-			// TODO: Implement.
+			w.handleClaim(msg.(*msgClaimingPartition))
 		case msgTypeReleasingPartition:
 			w.releaseClaim(msg.(*msgReleasingPartition))
 		case msgTypeClaimingMessages:

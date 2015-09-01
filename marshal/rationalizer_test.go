@@ -34,6 +34,18 @@ func Heartbeat(ts int, cl, gr, t string, id, lo int) *msgHeartbeat {
 	}
 }
 
+func ClaimingPartition(ts int, cl, gr, t string, id int) *msgClaimingPartition {
+	return &msgClaimingPartition{
+		msgBase: msgBase{
+			Time:     ts,
+			ClientId: cl,
+			GroupId:  gr,
+			Topic:    t,
+			PartId:   id,
+		},
+	}
+}
+
 func ReleasingPartition(ts int, cl, gr, t string, id, lo int) *msgReleasingPartition {
 	return &msgReleasingPartition{
 		msgBase: msgBase{
@@ -80,6 +92,95 @@ func TestIsClaimed(t *testing.T) {
 	ws.ts = HEARTBEAT_INTERVAL*2 + 1
 	if ws.IsClaimed("test1", 0) {
 		t.Error("Expected test1:0 to be unclaimed at double the heartbeat interval")
+	}
+}
+
+func TestClaimNotMutable(t *testing.T) {
+	ws := NewWorld()
+	out := make(chan message)
+	defer close(out)
+	go ws.rationalize(0, out)
+
+	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
+	// by the client/group given.
+	out <- Heartbeat(1, "cl", "gr", "test1", 0, 0)
+	time.Sleep(5 * time.Millisecond)
+
+	// They heartbeated at 1, should be claimed as of 1.
+	ws.ts = 1
+	cl := ws.GetPartitionClaim("test1", 0)
+	if cl.LastHeartbeat == 0 {
+		t.Error("Expected a claim, didn't get one")
+	}
+
+	// Modify structure, then refetch and make sure it hasn't been mutated
+	cl.ClientId = "invalid"
+	cl2 := ws.GetPartitionClaim("test1", 0)
+	if cl2.LastHeartbeat == 0 {
+		t.Error("Expected a claim, didn't get one")
+	}
+	if cl2.ClientId != "cl" {
+		t.Error("Claim was mutated!")
+	}
+}
+
+func TestClaimPartition(t *testing.T) {
+	ws := NewWorld()
+	out := make(chan message)
+	defer close(out)
+	go ws.rationalize(0, out)
+
+	// Build our return channel and insert it (simulating what the marshal does for
+	// actually trying to claim)
+	ret := make(chan bool, 1)
+	topic := ws.getTopicState("test1", 0)
+	topic.lock.Lock()
+	topic.partitions[0].pendingClaims = append(topic.partitions[0].pendingClaims, ret)
+	topic.lock.Unlock()
+
+	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
+	// by the client/group given.
+	ws.ts = 30
+	out <- ClaimingPartition(1, "cl", "gr", "test1", 0)
+
+	select {
+	case resp := <-ret:
+		if !resp {
+			t.Error("Failed to claim partition")
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timed out claiming partition")
+	}
+}
+
+func TestReclaimPartition(t *testing.T) {
+	ws := NewWorld()
+	out := make(chan message)
+	defer close(out)
+	go ws.rationalize(0, out)
+
+	// Build our return channel and insert it (simulating what the marshal does for
+	// actually trying to claim)
+	ret := make(chan bool, 1)
+	topic := ws.getTopicState("test1", 0)
+	topic.lock.Lock()
+	topic.partitions[0].pendingClaims = append(topic.partitions[0].pendingClaims, ret)
+	topic.lock.Unlock()
+
+	// This log is us having the partition (HB) + a CP from someone else + a CP from us,
+	// this should only fire a single 'true' into the out channel
+	ws.ts = 30
+	out <- Heartbeat(1, "cl", "gr", "test1", 0, 0)
+	out <- ClaimingPartition(2, "clother", "gr", "test1", 0)
+	out <- ClaimingPartition(3, "cl", "gr", "test1", 0)
+
+	select {
+	case resp := <-ret:
+		if !resp {
+			t.Error("Failed to claim partition")
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timed out claiming partition")
 	}
 }
 
