@@ -17,7 +17,7 @@ import (
 
 // kafkaConsumerChannel creates a consumer that continuously attempts to consume messages from
 // Kafka for the given partition.
-func (w *worldState) kafkaConsumerChannel(partId int) <-chan message {
+func (w *MarshalState) kafkaConsumerChannel(partId int) <-chan message {
 	out := make(chan message, 1000)
 	go func() {
 		// TODO: Technically we don't have to start at the beginning, we just need to start back
@@ -70,23 +70,34 @@ func (w *worldState) kafkaConsumerChannel(partId int) <-chan message {
 }
 
 // updateClaim is called whenever we need to adjust a claim structure.
-func (w *worldState) updateClaim(msg *msgHeartbeat) {
+func (w *MarshalState) updateClaim(msg *msgHeartbeat) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	topic, ok := w.topics[msg.Topic]
+	group, ok := w.groups[msg.GroupId]
 	if !ok {
-		log.Warning("Claim received for unknown topic/partition. Metadata stale?")
+		group = make(map[string]*topicState)
+		w.groups[msg.GroupId] = group
+	}
+
+	topic, ok := group[msg.Topic]
+	if !ok {
 		topic = &topicState{
-			// This creates as many partitions as we know they want, but this is possibly not
-			// going to be enough... it works for now at least.
 			partitions: make([]PartitionClaim, msg.PartId+1),
 		}
-		w.topics[msg.Topic] = topic
+		group[msg.Topic] = topic
 	}
 
 	topic.lock.Lock()
 	defer topic.lock.Unlock()
+
+	// They might be referring to a partition we don't know about, so let's extend our data
+	// structure if so.
+	if len(topic.partitions) < msg.PartId+1 {
+		for i := len(topic.partitions); i <= msg.PartId; i++ {
+			topic.partitions = append(topic.partitions, PartitionClaim{})
+		}
+	}
 
 	// Note that a heartbeat will just set the claim structure. It's not valid to heartbeat
 	// for something you don't own (which is why we have ClaimPartition as a separate
@@ -99,11 +110,17 @@ func (w *worldState) updateClaim(msg *msgHeartbeat) {
 }
 
 // releaseClaim is called whenever someone has released their claim on a partition.
-func (w *worldState) releaseClaim(msg *msgReleasingPartition) {
+func (w *MarshalState) releaseClaim(msg *msgReleasingPartition) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	topic, ok := w.topics[msg.Topic]
+	group, ok := w.groups[msg.GroupId]
+	if !ok {
+		log.Warning("Release received for unknown group.")
+		return
+	}
+
+	topic, ok := group[msg.Topic]
 	if !ok {
 		// In this particular case, we didn't know about the topic so we didn't know it
 		// was claimed anyway. We can just return.
@@ -129,7 +146,7 @@ func (w *worldState) releaseClaim(msg *msgReleasingPartition) {
 
 // rationalize is a goroutine that constantly consumes from a given partition of the marshal
 // topic and makes changes to the world state whenever something happens.
-func (w *worldState) rationalize(partId int, in <-chan message) { // Might be in over my head.
+func (w *MarshalState) rationalize(partId int, in <-chan message) { // Might be in over my head.
 	for {
 		msg, ok := <-in
 		if !ok {

@@ -16,15 +16,16 @@ import (
 	"github.com/optiopay/kafka"
 )
 
-// worldState is the main structure where we store information about the state of all of the
+// MarshalState is the main structure where we store information about the state of all of the
 // consumers and partitions.
-type worldState struct {
+type MarshalState struct {
 	quit     *int32
 	clientId string
 	groupId  string
 
 	lock   sync.RWMutex
-	topics map[string]*topicState
+	topics map[string]int
+	groups map[string]map[string]*topicState
 
 	kafka *kafka.Broker
 
@@ -34,7 +35,7 @@ type worldState struct {
 }
 
 // Topics returns the list of known topics.
-func (w *worldState) Topics() []string {
+func (w *MarshalState) Topics() []string {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
 
@@ -47,29 +48,23 @@ func (w *worldState) Topics() []string {
 
 // Partitions returns the count of how many partitions are in a given topic. Returns 0 if a
 // topic is unknown.
-func (w *worldState) Partitions(topicName string) int {
+func (w *MarshalState) Partitions(topicName string) int {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
 
-	topic, ok := w.topics[topicName]
-	if !ok {
-		return 0
-	}
-
-	topic.lock.RLock()
-	defer topic.lock.RUnlock()
-	return len(topic.partitions)
+	count, _ := w.topics[topicName]
+	return count
 }
 
 // Terminate is called when we're done with the marshaler and want to shut down.
-func (w *worldState) Terminate() {
+func (w *MarshalState) Terminate() {
 	atomic.StoreInt32(w.quit, 1)
 }
 
 // IsClaimed returns the current status on whether or not a partition is claimed by any other
-// consumer (including ourselves). A topic/partition that does not exist is considered to be
-// unclaimed.
-func (w *worldState) IsClaimed(topicName string, partId int) bool {
+// consumer in our group (including ourselves). A topic/partition that does not exist is
+// considered to be unclaimed.
+func (w *MarshalState) IsClaimed(topicName string, partId int) bool {
 	// The contract of this method is that if it returns something and the heartbeat is
 	// non-zero, the partition is claimed.
 	claim := w.GetPartitionClaim(topicName, partId)
@@ -78,11 +73,16 @@ func (w *worldState) IsClaimed(topicName string, partId int) bool {
 
 // GetPartitionClaim returns a PartitionClaim structure for a given partition. The structure
 // describes the consumer that is currently claiming this partition.
-func (w *worldState) GetPartitionClaim(topicName string, partId int) PartitionClaim {
+func (w *MarshalState) GetPartitionClaim(topicName string, partId int) PartitionClaim {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
 
-	topic, ok := w.topics[topicName]
+	group, ok := w.groups[w.groupId]
+	if !ok {
+		return PartitionClaim{}
+	}
+
+	topic, ok := group[topicName]
 	if !ok {
 		return PartitionClaim{}
 	}
@@ -128,6 +128,6 @@ func (w *worldState) GetPartitionClaim(topicName string, partId int) PartitionCl
 	}
 }
 
-func (w *worldState) ClaimPartition(topicName string, partId int) (bool, error) {
+func (w *MarshalState) ClaimPartition(topicName string, partId int) (bool, error) {
 	return false, nil
 }

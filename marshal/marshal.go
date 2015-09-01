@@ -28,29 +28,6 @@ const (
 
 var log = logging.MustGetLogger("PortalMarshal")
 
-// Marshaler is the declared interface of things you can do to interact with the marshaling
-// system.
-type Marshaler interface {
-	Topics() []string
-	Partitions(string) int
-	Terminate()
-
-	// IsClaimed returns whether or not a given topic/partition is presently believed to be
-	// claimed. Note that the only safe operation to perform with this information is to call
-	// ClaimPartition which might fail.
-	IsClaimed(topic string, partId int) bool
-
-	// GetPartitionClaim returns a PartitionClaim struct, which contains information about
-	// a particular partition. If the partition is not presently claimed by any consumer,
-	// the LastHeartbeat field will be 0.
-	GetPartitionClaim(topic string, partId int) PartitionClaim
-
-	// ClaimPartition will attempt to claim a partition. If this returns in the affirmative,
-	// then you may proceed with processing messages from the given partition as long as you
-	// continue to heartbeat.
-	ClaimPartition(topic string, partId int) (bool, error)
-}
-
 func init() {
 	logging.SetLevel(logging.WARNING, "PortalMarshal")
 }
@@ -60,19 +37,20 @@ func init() {
 // TODO: It might be nice to make the marshaler agnostic of clients and able to support
 // requests from N clients/groups. For now, though, we require instantiating a new
 // marshaler for every client/group.
-func NewMarshaler(clientId, groupId string, brokers []string) (Marshaler, error) {
+func NewMarshaler(clientId, groupId string, brokers []string) (*MarshalState, error) {
 	brokerConf := kafka.NewBrokerConf("PortalMarshal")
 
 	kfka, err := kafka.Dial(brokers, brokerConf)
 	if err != nil {
 		return nil, err
 	}
-	ws := &worldState{
+	ws := &MarshalState{
 		quit:     new(int32),
 		clientId: clientId,
 		groupId:  groupId,
 		kafka:    kfka,
-		topics:   make(map[string]*topicState),
+		topics:   make(map[string]int),
+		groups:   make(map[string]map[string]*topicState),
 	}
 	ws.lock.Lock() // Probably not strictly necessary.
 	defer ws.lock.Unlock()
@@ -88,9 +66,7 @@ func NewMarshaler(clientId, groupId string, brokers []string) (Marshaler, error)
 		if topic.Name == MARSHAL_TOPIC {
 			foundMarshal = len(topic.Partitions)
 		}
-		ws.topics[topic.Name] = &topicState{
-			partitions: make([]PartitionClaim, len(topic.Partitions)),
-		}
+		ws.topics[topic.Name] = len(topic.Partitions)
 		//log.Debug("Discovered: Topic %s has %d partitions.",
 		//	topic.Name, len(topic.Partitions))
 	}

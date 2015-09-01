@@ -12,12 +12,12 @@ func init() {
 	logging.SetLevel(logging.ERROR, "PortalMarshal")
 }
 
-func NewWorld() *worldState {
-	return &worldState{
+func NewWorld() *MarshalState {
+	return &MarshalState{
 		quit:     new(int32),
 		clientId: "cl",
 		groupId:  "gr",
-		topics:   make(map[string]*topicState),
+		groups:   make(map[string]map[string]*topicState),
 	}
 }
 
@@ -149,5 +149,50 @@ func TestClaimHandoff(t *testing.T) {
 	}
 	if ws.GetPartitionClaim("test1", 0).ClientId != "cl2" {
 		t.Error("Expected claim by cl2, but wasn't")
+	}
+
+	// Now we change the group ID of our world state (which client's can't do) and validate
+	// that these partitions are NOT claimed
+	ws.ts = 25
+	ws.groupId = "gr2"
+	if ws.IsClaimed("test1", 0) {
+		t.Error("Expected test:0 to be unclaimed at ts=25")
+	}
+	if ws.GetPartitionClaim("test1", 0).ClientId != "" {
+		t.Error("Expected unclaimed, but was")
+	}
+}
+
+func TestPartitionExtend(t *testing.T) {
+	ws := NewWorld()
+	out := make(chan message)
+	defer close(out)
+	go ws.rationalize(0, out)
+
+	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
+	// by the client/group given.
+	out <- Heartbeat(1, "cl", "gr", "test1", 0, 0)
+	time.Sleep(5 * time.Millisecond)
+
+	// Ensure len is 1
+	if len(ws.groups["gr"]["test1"].partitions) != 1 {
+		t.Error("Expected only 1 partition")
+	}
+
+	// Extend by 4
+	out <- Heartbeat(2, "cl2", "gr", "test1", 4, 0)
+	time.Sleep(5 * time.Millisecond)
+
+	// Ensure len is 5
+	if len(ws.groups["gr"]["test1"].partitions) != 5 {
+		t.Error("Expected only 5 partitions")
+	}
+
+	// Ensure 0 and 4 are claimed by us
+	p1 := ws.groups["gr"]["test1"].partitions[0]
+	p2 := ws.groups["gr"]["test1"].partitions[4]
+	if p1.ClientId != "cl" || p1.GroupId != "gr" || p1.LastHeartbeat != 1 ||
+		p2.ClientId != "cl2" || p2.GroupId != "gr" || p2.LastHeartbeat != 2 {
+		t.Error("Partition contents unexpected")
 	}
 }
