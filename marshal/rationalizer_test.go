@@ -276,15 +276,24 @@ func TestPartitionExtend(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 
 	// Ensure len is 1
+	ws.lock.RLock()
+	ws.groups["gr"]["test1"].lock.RLock()
 	if len(ws.groups["gr"]["test1"].partitions) != 1 {
 		t.Error("Expected only 1 partition")
 	}
+	ws.groups["gr"]["test1"].lock.RUnlock()
+	ws.lock.RUnlock()
 
 	// Extend by 4
 	out <- Heartbeat(2, "cl2", "gr", "test1", 4, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// Ensure len is 5
+	ws.lock.RLock()
+	defer ws.lock.RUnlock()
+	ws.groups["gr"]["test1"].lock.RLock()
+	defer ws.groups["gr"]["test1"].lock.RUnlock()
+
 	if len(ws.groups["gr"]["test1"].partitions) != 5 {
 		t.Error("Expected only 5 partitions")
 	}
