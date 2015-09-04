@@ -57,6 +57,7 @@ func (w *MarshalState) getTopicState(topicName string, partId int) *topicState {
 	}
 
 	// They might be referring to a partition we don't know about, maybe extend it
+	// TODO: This should have the topic lock
 	if len(topic.partitions) < partId+1 {
 		for i := len(topic.partitions); i <= partId; i++ {
 			topic.partitions = append(topic.partitions, PartitionClaim{})

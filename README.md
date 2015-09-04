@@ -9,6 +9,9 @@ TBD.
 
 ## Marshal
 
+[![GoDoc](http://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/zorkian/portal/marshal)
+[![Build Status](https://travis-ci.org/zorkian/portal.svg)](https://travis-ci.org/zorkian/portal)
+
 Busy topics have many partitions, and coordinating N consumers of those partitions is a somewhat
 non-trivial task. Most people use Zookeeper or write some other coordination system with the
 logic on their own, but getting everything right is quite taxing.
