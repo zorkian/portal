@@ -110,3 +110,76 @@ func TestClaimPartitionIntegration(t *testing.T) {
 		t.Error("Timed out claiming partition")
 	}
 }
+
+// This is a full integration test of a claim, heartbeat, and release cycle
+func TestPartitionLifecycleIntegration(t *testing.T) {
+	srv := StartServer()
+
+	m, err := NewMarshaler("cl", "gr", []string{srv.Addr()})
+	if err != nil {
+		t.Errorf("New failed: %s", err)
+	}
+	defer m.Terminate()
+
+	// Claim partition (this is synchronous, will only return when)
+	// it has succeeded
+	resp := m.ClaimPartition("test1", 0)
+	if !resp {
+		t.Error("Failed to claim partition")
+	}
+
+	// Ensure we have claimed it
+	cl := m.GetPartitionClaim("test1", 0)
+	if cl.LastHeartbeat <= 0 || cl.ClientId != "cl" || cl.GroupId != "gr" {
+		t.Error("PartitionClaim values unexpected")
+	}
+	if cl.LastOffset != 0 {
+		t.Error("LastOffset is not 0")
+	}
+
+	// Now heartbeat on it to update the last offset
+	err = m.Heartbeat("test1", 0, 10)
+	if err != nil {
+		t.Error("Failed to Heartbeat for partition")
+	}
+
+	// Now we have to wait for the rationalizer to update, so let's pause
+	time.Sleep(500 * time.Millisecond)
+
+	// Get the claim again, validate it's updated
+	cl = m.GetPartitionClaim("test1", 0)
+	if cl.LastHeartbeat <= 0 || cl.ClientId != "cl" || cl.GroupId != "gr" {
+		t.Error("PartitionClaim values unexpected")
+	}
+	if cl.LastOffset != 10 {
+		t.Error("LastOffset is not 10")
+	}
+
+	// Release
+	err = m.ReleasePartition("test1", 0, 20)
+	if err != nil {
+		t.Error("Failed to Release for partition")
+	}
+
+	// Now we have to wait for the rationalizer to update, so let's pause
+	time.Sleep(500 * time.Millisecond)
+
+	// Get the claim again, validate it's empty
+	cl = m.GetPartitionClaim("test1", 0)
+	if cl.LastHeartbeat > 0 || cl.ClientId != "" || cl.GroupId != "" {
+		t.Error("PartitionClaim values unexpected %s", cl)
+	}
+	if cl.LastOffset != 0 {
+		t.Error("LastOffset is not 20")
+	}
+
+	// Get the last known claim data
+	cl = m.GetLastPartitionClaim("test1", 0)
+	if cl.LastHeartbeat > 0 || cl.ClientId != "cl" || cl.GroupId != "gr" {
+		t.Error("PartitionClaim values unexpected %s", cl)
+	}
+	if cl.LastOffset != 20 {
+		t.Error("LastOffset is not 20")
+	}
+
+}

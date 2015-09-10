@@ -9,6 +9,7 @@
 package marshal
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,18 @@ func (w *MarshalState) GetPartitionClaim(topicName string, partId int) Partition
 	return PartitionClaim{}
 }
 
+// GetLastPartitionClaim returns a PartitionClaim structure for a given partition. The structure
+// describes the consumer that is currently or most recently claiming this partition. This is a
+// copy of the claim structure, so changing it cannot change the world state.
+func (w *MarshalState) GetLastPartitionClaim(topicName string, partId int) PartitionClaim {
+	topic := w.getTopicState(topicName, partId)
+
+	topic.lock.RLock()
+	defer topic.lock.RUnlock()
+
+	return topic.partitions[partId] // copy.
+}
+
 // ClaimPartition is how you can actually claim a partition. If you call this, Marshal will
 // attempt to claim the partition on your behalf. This is the low level function, you probably
 // want to use a MarshaledConsumer. Returns a bool on whether or not the claim succeeded and
@@ -171,4 +184,86 @@ func (w *MarshalState) ClaimPartition(topicName string, partId int) bool {
 	// Finally wait and return the result. The rationalizer should see the above message
 	// and know it was from us, and will be able to know if we won or not.
 	return <-out
+}
+
+// Heartbeat will send an update for other people to know that we're still alive and
+// still owning this partition. Returns an error if anything has gone wrong (at which
+// point we can no longer assert we have the lock).
+func (w *MarshalState) Heartbeat(topicName string, partId, lastOffset int) error {
+	topic := w.getTopicState(topicName, partId)
+
+	topic.lock.RLock()
+	defer topic.lock.RUnlock()
+
+	// If the topic is not claimed, we can short circuit the decision process
+	if !topic.partitions[partId].isClaimed(w.ts) {
+		return fmt.Errorf("Partition %s:%d is not claimed!", topicName, partId)
+	}
+
+	// And if it's not claimed by us...
+	if topic.partitions[partId].GroupId != w.groupId ||
+		topic.partitions[partId].ClientId != w.clientId {
+		return fmt.Errorf("Partition %s:%d is not claimed by us!", topicName, partId)
+	}
+
+	// All good, let's heartbeat
+	cl := &msgHeartbeat{
+		msgBase: msgBase{
+			Time:     int(time.Now().Unix()),
+			ClientId: w.clientId,
+			GroupId:  w.groupId,
+			Topic:    topicName,
+			PartId:   partId,
+		},
+		LastOffset: lastOffset,
+	}
+	// TODO: Use non-0 partition
+	_, err := w.kafkaProducer.Produce(MARSHAL_TOPIC, 0,
+		&proto.Message{Value: []byte(cl.Encode())})
+	if err != nil {
+		return fmt.Errorf("Failed to produce heartbeat to Kafka: %s", err)
+	}
+
+	return nil
+}
+
+// ReleasePartition will send an update for other people to know that we're done with
+// a partition. Returns an error if anything has gone wrong (at which
+// point we can no longer assert we have the lock).
+func (w *MarshalState) ReleasePartition(topicName string, partId, lastOffset int) error {
+	topic := w.getTopicState(topicName, partId)
+
+	topic.lock.RLock()
+	defer topic.lock.RUnlock()
+
+	// If the topic is not claimed, we can short circuit the decision process
+	if !topic.partitions[partId].isClaimed(w.ts) {
+		return fmt.Errorf("Partition %s:%d is not claimed!", topicName, partId)
+	}
+
+	// And if it's not claimed by us...
+	if topic.partitions[partId].GroupId != w.groupId ||
+		topic.partitions[partId].ClientId != w.clientId {
+		return fmt.Errorf("Partition %s:%d is not claimed by us!", topicName, partId)
+	}
+
+	// All good, let's release
+	cl := &msgReleasingPartition{
+		msgBase: msgBase{
+			Time:     int(time.Now().Unix()),
+			ClientId: w.clientId,
+			GroupId:  w.groupId,
+			Topic:    topicName,
+			PartId:   partId,
+		},
+		LastOffset: lastOffset,
+	}
+	// TODO: Use non-0 partition
+	_, err := w.kafkaProducer.Produce(MARSHAL_TOPIC, 0,
+		&proto.Message{Value: []byte(cl.Encode())})
+	if err != nil {
+		return fmt.Errorf("Failed to produce release to Kafka: %s", err)
+	}
+
+	return nil
 }

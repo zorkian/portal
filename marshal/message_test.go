@@ -80,13 +80,14 @@ func TestMessageDecode(t *testing.T) {
 		t.Error("ClaimingPartition message contents invalid")
 	}
 
-	msg, err = Decode([]byte("ReleasingPartition/2/cl/gr/t/1"))
+	msg, err = Decode([]byte("ReleasingPartition/2/cl/gr/t/1/9"))
 	if msg == nil || err != nil {
 		t.Error("Expected msg, got error", err)
 	}
 	mrp, ok := msg.(*msgReleasingPartition)
 	if !ok || msg.Type() != msgTypeReleasingPartition || mrp.ClientId != "cl" ||
-		mrp.GroupId != "gr" || mrp.Topic != "t" || mrp.PartId != 1 || mrp.Time != 2 {
+		mrp.GroupId != "gr" || mrp.Topic != "t" || mrp.PartId != 1 || mrp.Time != 2 ||
+		mrp.LastOffset != 9 {
 		t.Error("ReleasingPartition message contents invalid")
 	}
 

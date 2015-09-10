@@ -73,10 +73,14 @@ func Decode(inp []byte) (message, error) {
 		}
 		return &msgClaimingPartition{msgBase: base}, nil
 	case "ReleasingPartition":
-		if len(parts) != 6 {
+		if len(parts) != 7 {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
 		}
-		return &msgReleasingPartition{msgBase: base}, nil
+		offset, err := strconv.Atoi(parts[6])
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
+		}
+		return &msgReleasingPartition{msgBase: base, LastOffset: offset}, nil
 	case "ClaimingMessages":
 		if len(parts) != 7 {
 			return nil, errors.New(fmt.Sprintf("Invalid message: [%s]", string(inp)))
