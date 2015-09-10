@@ -7,10 +7,10 @@ import (
 func TestMessageEncode(t *testing.T) {
 	base := msgBase{
 		Time:     2,
-		ClientId: "cl",
-		GroupId:  "gr",
+		ClientID: "cl",
+		GroupID:  "gr",
 		Topic:    "t",
-		PartId:   3,
+		PartID:   3,
 	}
 
 	bstr := base.Encode()
@@ -55,49 +55,49 @@ func TestMessageEncode(t *testing.T) {
 }
 
 func TestMessageDecode(t *testing.T) {
-	msg, err := Decode([]byte("banana"))
+	msg, err := decode([]byte("banana"))
 	if msg != nil || err == nil {
 		t.Error("Expected error, got msg", msg)
 	}
 
-	msg, err = Decode([]byte("Heartbeat/2/cl/gr/t/1/2"))
+	msg, err = decode([]byte("Heartbeat/2/cl/gr/t/1/2"))
 	if msg == nil || err != nil {
 		t.Error("Expected msg, got error", err)
 	}
 	mhb, ok := msg.(*msgHeartbeat)
-	if !ok || msg.Type() != msgTypeHeartbeat || mhb.ClientId != "cl" || mhb.GroupId != "gr" ||
-		mhb.Topic != "t" || mhb.PartId != 1 || mhb.LastOffset != 2 || mhb.Time != 2 {
+	if !ok || msg.Type() != msgTypeHeartbeat || mhb.ClientID != "cl" || mhb.GroupID != "gr" ||
+		mhb.Topic != "t" || mhb.PartID != 1 || mhb.LastOffset != 2 || mhb.Time != 2 {
 		t.Error("Heartbeat message contents invalid")
 	}
 
-	msg, err = Decode([]byte("ClaimingPartition/2/cl/gr/t/1"))
+	msg, err = decode([]byte("ClaimingPartition/2/cl/gr/t/1"))
 	if msg == nil || err != nil {
 		t.Error("Expected msg, got error", err)
 	}
 	mcp, ok := msg.(*msgClaimingPartition)
-	if !ok || msg.Type() != msgTypeClaimingPartition || mcp.ClientId != "cl" ||
-		mcp.GroupId != "gr" || mcp.Topic != "t" || mcp.PartId != 1 || mcp.Time != 2 {
+	if !ok || msg.Type() != msgTypeClaimingPartition || mcp.ClientID != "cl" ||
+		mcp.GroupID != "gr" || mcp.Topic != "t" || mcp.PartID != 1 || mcp.Time != 2 {
 		t.Error("ClaimingPartition message contents invalid")
 	}
 
-	msg, err = Decode([]byte("ReleasingPartition/2/cl/gr/t/1/9"))
+	msg, err = decode([]byte("ReleasingPartition/2/cl/gr/t/1/9"))
 	if msg == nil || err != nil {
 		t.Error("Expected msg, got error", err)
 	}
 	mrp, ok := msg.(*msgReleasingPartition)
-	if !ok || msg.Type() != msgTypeReleasingPartition || mrp.ClientId != "cl" ||
-		mrp.GroupId != "gr" || mrp.Topic != "t" || mrp.PartId != 1 || mrp.Time != 2 ||
+	if !ok || msg.Type() != msgTypeReleasingPartition || mrp.ClientID != "cl" ||
+		mrp.GroupID != "gr" || mrp.Topic != "t" || mrp.PartID != 1 || mrp.Time != 2 ||
 		mrp.LastOffset != 9 {
 		t.Error("ReleasingPartition message contents invalid")
 	}
 
-	msg, err = Decode([]byte("ClaimingMessages/2/cl/gr/t/1/2"))
+	msg, err = decode([]byte("ClaimingMessages/2/cl/gr/t/1/2"))
 	if msg == nil || err != nil {
 		t.Error("Expected msg, got error", err)
 	}
 	mcm, ok := msg.(*msgClaimingMessages)
-	if !ok || msg.Type() != msgTypeClaimingMessages || mcm.ClientId != "cl" || mcm.GroupId != "gr" ||
-		mcm.Topic != "t" || mcm.PartId != 1 || mcm.ProposedLastOffset != 2 || mcm.Time != 2 {
+	if !ok || msg.Type() != msgTypeClaimingMessages || mcm.ClientID != "cl" || mcm.GroupID != "gr" ||
+		mcm.Topic != "t" || mcm.PartID != 1 || mcm.ProposedLastOffset != 2 || mcm.Time != 2 {
 		t.Error("ClaimingMessages message contents invalid")
 	}
 }

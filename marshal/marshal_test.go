@@ -16,7 +16,7 @@ func MakeTopic(srv *kafkatest.Server, topic string, numPartitions int) {
 func StartServer() *kafkatest.Server {
 	srv := kafkatest.NewServer()
 	srv.MustSpawn()
-	MakeTopic(srv, MARSHAL_TOPIC, 4)
+	MakeTopic(srv, MarshalTopic, 4)
 	MakeTopic(srv, "test1", 1)
 	MakeTopic(srv, "test16", 16)
 	return srv
@@ -31,7 +31,7 @@ func TestNewMarshaler(t *testing.T) {
 	}
 	defer m.Terminate()
 
-	ct := m.Partitions(MARSHAL_TOPIC)
+	ct := m.Partitions(MarshalTopic)
 	if ct != 4 {
 		t.Error("Expected 4 partitions got", ct)
 	}
@@ -68,7 +68,7 @@ func TestClaimPartitionIntegration(t *testing.T) {
 		resp <- m.ClaimPartition("test1", 0) // true
 		resp <- m.ClaimPartition("test1", 0) // true (no-op)
 		m.lock.Lock()
-		m.clientId = "cl-other"
+		m.clientID = "cl-other"
 		m.lock.Unlock()
 		resp <- m.ClaimPartition("test1", 0) // false (collission)
 		resp <- m.ClaimPartition("test1", 1) // true (new client)
@@ -130,7 +130,7 @@ func TestPartitionLifecycleIntegration(t *testing.T) {
 
 	// Ensure we have claimed it
 	cl := m.GetPartitionClaim("test1", 0)
-	if cl.LastHeartbeat <= 0 || cl.ClientId != "cl" || cl.GroupId != "gr" {
+	if cl.LastHeartbeat <= 0 || cl.ClientID != "cl" || cl.GroupID != "gr" {
 		t.Error("PartitionClaim values unexpected")
 	}
 	if cl.LastOffset != 0 {
@@ -148,7 +148,7 @@ func TestPartitionLifecycleIntegration(t *testing.T) {
 
 	// Get the claim again, validate it's updated
 	cl = m.GetPartitionClaim("test1", 0)
-	if cl.LastHeartbeat <= 0 || cl.ClientId != "cl" || cl.GroupId != "gr" {
+	if cl.LastHeartbeat <= 0 || cl.ClientID != "cl" || cl.GroupID != "gr" {
 		t.Error("PartitionClaim values unexpected")
 	}
 	if cl.LastOffset != 10 {
@@ -166,7 +166,7 @@ func TestPartitionLifecycleIntegration(t *testing.T) {
 
 	// Get the claim again, validate it's empty
 	cl = m.GetPartitionClaim("test1", 0)
-	if cl.LastHeartbeat > 0 || cl.ClientId != "" || cl.GroupId != "" {
+	if cl.LastHeartbeat > 0 || cl.ClientID != "" || cl.GroupID != "" {
 		t.Error("PartitionClaim values unexpected %s", cl)
 	}
 	if cl.LastOffset != 0 {
@@ -175,7 +175,7 @@ func TestPartitionLifecycleIntegration(t *testing.T) {
 
 	// Get the last known claim data
 	cl = m.GetLastPartitionClaim("test1", 0)
-	if cl.LastHeartbeat > 0 || cl.ClientId != "cl" || cl.GroupId != "gr" {
+	if cl.LastHeartbeat > 0 || cl.ClientID != "cl" || cl.GroupID != "gr" {
 		t.Error("PartitionClaim values unexpected %s", cl)
 	}
 	if cl.LastOffset != 20 {

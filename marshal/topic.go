@@ -24,8 +24,8 @@ type topicState struct {
 type PartitionClaim struct {
 	LastHeartbeat int64
 	LastOffset    int
-	ClientId      string
-	GroupId       string
+	ClientID      string
+	GroupID       string
 
 	// Used internally when someone is waiting on this partition to be claimed.
 	pendingClaims []chan bool
@@ -34,9 +34,9 @@ type PartitionClaim struct {
 // isClaimed returns a boolean indicating whether or not this structure is indicating a
 // still valid claim. Validity is based on the delta between NOW and lastHeartbeat:
 //
-// delta = 0 .. HEARTBEAT_INTERVAL: claim good.
-//         HEARTBEAT_INTERVAL .. 2*HEARTBEAT_INTERVAL-1: claim good.
-//         >2xHEARTBEAT_INTERVAL: claim invalid.
+// delta = 0 .. HeartbeatInterval: claim good.
+//         HeartbeatInterval .. 2*HeartbeatInterval-1: claim good.
+//         >2xHeartbeatInterval: claim invalid.
 //
 // This means that the worst case for a "dead consumer" that has failed to heartbeat
 // is that a partition will be idle for twice the heartbeat interval.
@@ -56,10 +56,10 @@ func (p *PartitionClaim) isClaimed(ts int64) bool {
 
 	delta := now - p.LastHeartbeat
 	switch {
-	case 0 <= delta && delta <= HEARTBEAT_INTERVAL:
+	case 0 <= delta && delta <= HeartbeatInterval:
 		// Fresh claim - all good
 		return true
-	case HEARTBEAT_INTERVAL < delta && delta < 2*HEARTBEAT_INTERVAL:
+	case HeartbeatInterval < delta && delta < 2*HeartbeatInterval:
 		// Aging claim - missed/delayed heartbeat, but still in tolerance
 		return true
 	default:

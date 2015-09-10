@@ -16,14 +16,14 @@ import (
 )
 
 const (
-	// The main topic used for coordination. This must be constant across all consumers that
-	// you want to coordinate.
-	MARSHAL_TOPIC = "__marshal"
+	// MarshalTopic is the main topic used for coordination. This must be constant across all
+	// consumers that you want to coordinate.
+	MarshalTopic = "__marshal"
 
-	// This is the main timing used to determine how "chatty" the system is and how fast it
-	// responds to failures of consumers. THIS VALUE MUST BE THE SAME BETWEEN ALL CONSUMERS
+	// HeartbeatInterval is the main timing used to determine how "chatty" the system is and how
+	// fast it responds to failures of consumers. THIS VALUE MUST BE THE SAME BETWEEN ALL CONSUMERS
 	// as it is critical to coordination.
-	HEARTBEAT_INTERVAL = 60 // Measured in seconds.
+	HeartbeatInterval = 60 // Measured in seconds.
 )
 
 var log = logging.MustGetLogger("PortalMarshal")
@@ -37,17 +37,17 @@ func init() {
 // TODO: It might be nice to make the marshaler agnostic of clients and able to support
 // requests from N clients/groups. For now, though, we require instantiating a new
 // marshaler for every client/group.
-func NewMarshaler(clientId, groupId string, brokers []string) (*MarshalState, error) {
+func NewMarshaler(clientID, groupID string, brokers []string) (*State, error) {
 	brokerConf := kafka.NewBrokerConf("PortalMarshal")
 
 	kfka, err := kafka.Dial(brokers, brokerConf)
 	if err != nil {
 		return nil, err
 	}
-	ws := &MarshalState{
+	ws := &State{
 		quit:          new(int32),
-		clientId:      clientId,
-		groupId:       groupId,
+		clientID:      clientID,
+		groupID:       groupID,
 		kafka:         kfka,
 		kafkaProducer: kfka.Producer(kafka.NewProducerConf()),
 		topics:        make(map[string]int),
@@ -64,7 +64,7 @@ func NewMarshaler(clientId, groupId string, brokers []string) (*MarshalState, er
 	}
 	foundMarshal := 0
 	for _, topic := range md.Topics {
-		if topic.Name == MARSHAL_TOPIC {
+		if topic.Name == MarshalTopic {
 			foundMarshal = len(topic.Partitions)
 		}
 		ws.topics[topic.Name] = len(topic.Partitions)
