@@ -152,6 +152,27 @@ func (w *Marshaler) GetLastPartitionClaim(topicName string, partID int) Partitio
 	return topic.partitions[partID] // copy.
 }
 
+// GetPartitionOffsets returns the current state of a topic/partition. This has to hit Kafka
+// twice to ask about a partition, but it returns the full state of information that can be
+// used to calculate consumer lag.
+func (w *Marshaler) GetPartitionOffsets(topicName string, partID int) (
+	offsetEarliest, offsetLatest, offsetCurrent int64, err error) {
+
+	offsetEarliest, err = w.kafka.OffsetEarliest(topicName, int32(partID))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	offsetLatest, err = w.kafka.OffsetLatest(topicName, int32(partID))
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	// Use the last claim we know about, whatever it is
+	claim := w.GetLastPartitionClaim(topicName, partID)
+	return offsetEarliest, offsetLatest, claim.LastOffset, nil
+}
+
 // ClaimPartition is how you can actually claim a partition. If you call this, Marshal will
 // attempt to claim the partition on your behalf. This is the low level function, you probably
 // want to use a MarshaledConsumer. Returns a bool on whether or not the claim succeeded and
