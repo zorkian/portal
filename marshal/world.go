@@ -30,12 +30,31 @@ type Marshaler struct {
 	topics map[string]int
 	groups map[string]map[string]*topicState
 
-	kafka         *kafka.Broker
-	kafkaProducer kafka.Producer
+	kafka    *kafka.Broker
+	producer kafka.Producer
 
 	// This is for testing only. When this is non-zero, the rationalizer will answer
 	// queries based on THIS time instead of the current, actual time.
 	ts int64
+}
+
+// refreshMetadata is periodically used to update our internal state with topic information
+// about the world.
+func (w *Marshaler) refreshMetadata() error {
+	md, err := w.kafka.Metadata()
+	if err != nil {
+		return err
+	}
+
+	newTopics := make(map[string]int)
+	for _, topic := range md.Topics {
+		newTopics[topic.Name] = len(topic.Partitions)
+	}
+
+	w.lock.Lock()
+	defer w.lock.Unlock()
+	w.topics = newTopics
+	return nil
 }
 
 // getTopicState returns a topicState and possibly creates it and the partition state within
@@ -172,7 +191,7 @@ func (w *Marshaler) ClaimPartition(topicName string, partID int) bool {
 			PartID:   partID,
 		},
 	}
-	_, err := w.kafkaProducer.Produce(MarshalTopic, 0,
+	_, err := w.producer.Produce(MarshalTopic, 0,
 		&proto.Message{Value: []byte(cl.Encode())})
 	if err != nil {
 		// If we failed to produce, this is probably serious so we should undo the work
@@ -218,7 +237,7 @@ func (w *Marshaler) Heartbeat(topicName string, partID, lastOffset int) error {
 		LastOffset: lastOffset,
 	}
 	// TODO: Use non-0 partition
-	_, err := w.kafkaProducer.Produce(MarshalTopic, 0,
+	_, err := w.producer.Produce(MarshalTopic, 0,
 		&proto.Message{Value: []byte(cl.Encode())})
 	if err != nil {
 		return fmt.Errorf("Failed to produce heartbeat to Kafka: %s", err)
@@ -259,7 +278,7 @@ func (w *Marshaler) ReleasePartition(topicName string, partID, lastOffset int) e
 		LastOffset: lastOffset,
 	}
 	// TODO: Use non-0 partition
-	_, err := w.kafkaProducer.Produce(MarshalTopic, 0,
+	_, err := w.producer.Produce(MarshalTopic, 0,
 		&proto.Message{Value: []byte(cl.Encode())})
 	if err != nil {
 		return fmt.Errorf("Failed to produce release to Kafka: %s", err)

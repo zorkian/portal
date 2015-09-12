@@ -10,6 +10,9 @@ package marshal
 
 import (
 	"errors"
+	"fmt"
+	"sync/atomic"
+	"time"
 
 	"github.com/op/go-logging"
 	"github.com/optiopay/kafka"
@@ -45,45 +48,45 @@ func NewMarshaler(clientID, groupID string, brokers []string) (*Marshaler, error
 		return nil, err
 	}
 	ws := &Marshaler{
-		quit:          new(int32),
-		clientID:      clientID,
-		groupID:       groupID,
-		kafka:         kfka,
-		kafkaProducer: kfka.Producer(kafka.NewProducerConf()),
-		topics:        make(map[string]int),
-		groups:        make(map[string]map[string]*topicState),
+		quit:     new(int32),
+		clientID: clientID,
+		groupID:  groupID,
+		kafka:    kfka,
+		producer: kfka.Producer(kafka.NewProducerConf()),
+		topics:   make(map[string]int),
+		groups:   make(map[string]map[string]*topicState),
 	}
-	ws.lock.Lock() // Probably not strictly necessary.
-	defer ws.lock.Unlock()
 
-	// TODO: This is unfortunate, as this triggers a completely fresh metadata fresh. We did one
-	// just moments ago with the Dial...
-	md, err := kfka.Metadata()
+	// Do an initial metadata fetch, this will block a bit
+	err = ws.refreshMetadata()
 	if err != nil {
-		return nil, err
-	}
-	foundMarshal := 0
-	for _, topic := range md.Topics {
-		if topic.Name == MarshalTopic {
-			foundMarshal = len(topic.Partitions)
-		}
-		ws.topics[topic.Name] = len(topic.Partitions)
-		//log.Debug("Discovered: Topic %s has %d partitions.",
-		//	topic.Name, len(topic.Partitions))
+		return nil, fmt.Errorf("Failed to get metadata: %s", err)
 	}
 
 	// If there is no marshal topic, then we can't run. The admins must go create the topic
 	// before they can use this library. Please see the README.
-	if foundMarshal == 0 {
+	marshalPartitions := ws.Partitions(MarshalTopic)
+	if marshalPartitions == 0 {
 		return nil, errors.New("Marshalling topic not found. Please see the documentation.")
 	}
 
 	// Now we start a goroutine to start consuming each of the partitions in the marshal
 	// topic. Note that this doesn't handle increasing the partition count on that topic
 	// without stopping all consumers.
-	for id := 0; id < foundMarshal; id++ {
+	for id := 0; id < marshalPartitions; id++ {
 		go ws.rationalize(id, ws.kafkaConsumerChannel(id))
 	}
+
+	// Now start the metadata refreshing goroutine
+	go func() {
+		for {
+			time.Sleep(HeartbeatInterval * time.Second)
+			if atomic.LoadInt32(ws.quit) == 1 {
+				return
+			}
+			ws.refreshMetadata()
+		}
+	}()
 
 	return ws, nil
 }
