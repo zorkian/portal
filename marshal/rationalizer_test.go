@@ -12,8 +12,8 @@ func init() {
 	logging.SetLevel(logging.ERROR, "PortalMarshal")
 }
 
-func NewWorld() *State {
-	return &State{
+func NewWorld() *Marshaler {
+	return &Marshaler{
 		quit:     new(int32),
 		clientID: "cl",
 		groupID:  "gr",

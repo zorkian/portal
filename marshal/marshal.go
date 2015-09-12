@@ -37,14 +37,14 @@ func init() {
 // TODO: It might be nice to make the marshaler agnostic of clients and able to support
 // requests from N clients/groups. For now, though, we require instantiating a new
 // marshaler for every client/group.
-func NewMarshaler(clientID, groupID string, brokers []string) (*State, error) {
+func NewMarshaler(clientID, groupID string, brokers []string) (*Marshaler, error) {
 	brokerConf := kafka.NewBrokerConf("PortalMarshal")
 
 	kfka, err := kafka.Dial(brokers, brokerConf)
 	if err != nil {
 		return nil, err
 	}
-	ws := &State{
+	ws := &Marshaler{
 		quit:          new(int32),
 		clientID:      clientID,
 		groupID:       groupID,

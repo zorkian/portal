@@ -18,9 +18,10 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-// State is the main structure where we store information about all of the consumers, topics,
-// and partitions that exist.7
-type State struct {
+// Marshaler is the coordinator type. It is designed to be used once globally and
+// is thread safe. Creating one of these will create connections to your Kafka
+// cluster and begin actively monitoring the coordination topic.
+type Marshaler struct {
 	quit     *int32
 	clientID string
 	groupID  string
@@ -39,7 +40,7 @@ type State struct {
 
 // getTopicState returns a topicState and possibly creates it and the partition state within
 // the State.
-func (w *State) getTopicState(topicName string, partID int) *topicState {
+func (w *Marshaler) getTopicState(topicName string, partID int) *topicState {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
@@ -69,7 +70,7 @@ func (w *State) getTopicState(topicName string, partID int) *topicState {
 }
 
 // Topics returns the list of known topics.
-func (w *State) Topics() []string {
+func (w *Marshaler) Topics() []string {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
 
@@ -82,7 +83,7 @@ func (w *State) Topics() []string {
 
 // Partitions returns the count of how many partitions are in a given topic. Returns 0 if a
 // topic is unknown.
-func (w *State) Partitions(topicName string) int {
+func (w *Marshaler) Partitions(topicName string) int {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
 
@@ -91,14 +92,14 @@ func (w *State) Partitions(topicName string) int {
 }
 
 // Terminate is called when we're done with the marshaler and want to shut down.
-func (w *State) Terminate() {
+func (w *Marshaler) Terminate() {
 	atomic.StoreInt32(w.quit, 1)
 }
 
 // IsClaimed returns the current status on whether or not a partition is claimed by any other
 // consumer in our group (including ourselves). A topic/partition that does not exist is
 // considered to be unclaimed.
-func (w *State) IsClaimed(topicName string, partID int) bool {
+func (w *Marshaler) IsClaimed(topicName string, partID int) bool {
 	// The contract of this method is that if it returns something and the heartbeat is
 	// non-zero, the partition is claimed.
 	claim := w.GetPartitionClaim(topicName, partID)
@@ -108,7 +109,7 @@ func (w *State) IsClaimed(topicName string, partID int) bool {
 // GetPartitionClaim returns a PartitionClaim structure for a given partition. The structure
 // describes the consumer that is currently claiming this partition. This is a copy of the
 // claim structure, so changing it cannot change the world state.
-func (w *State) GetPartitionClaim(topicName string, partID int) PartitionClaim {
+func (w *Marshaler) GetPartitionClaim(topicName string, partID int) PartitionClaim {
 	topic := w.getTopicState(topicName, partID)
 
 	topic.lock.RLock()
@@ -123,7 +124,7 @@ func (w *State) GetPartitionClaim(topicName string, partID int) PartitionClaim {
 // GetLastPartitionClaim returns a PartitionClaim structure for a given partition. The structure
 // describes the consumer that is currently or most recently claiming this partition. This is a
 // copy of the claim structure, so changing it cannot change the world state.
-func (w *State) GetLastPartitionClaim(topicName string, partID int) PartitionClaim {
+func (w *Marshaler) GetLastPartitionClaim(topicName string, partID int) PartitionClaim {
 	topic := w.getTopicState(topicName, partID)
 
 	topic.lock.RLock()
@@ -136,7 +137,7 @@ func (w *State) GetLastPartitionClaim(topicName string, partID int) PartitionCla
 // attempt to claim the partition on your behalf. This is the low level function, you probably
 // want to use a MarshaledConsumer. Returns a bool on whether or not the claim succeeded and
 // whether you can continue.
-func (w *State) ClaimPartition(topicName string, partID int) bool {
+func (w *Marshaler) ClaimPartition(topicName string, partID int) bool {
 	topic := w.getTopicState(topicName, partID)
 
 	// Unlock is later, since this function might take a while
@@ -188,7 +189,7 @@ func (w *State) ClaimPartition(topicName string, partID int) bool {
 // Heartbeat will send an update for other people to know that we're still alive and
 // still owning this partition. Returns an error if anything has gone wrong (at which
 // point we can no longer assert we have the lock).
-func (w *State) Heartbeat(topicName string, partID, lastOffset int) error {
+func (w *Marshaler) Heartbeat(topicName string, partID, lastOffset int) error {
 	topic := w.getTopicState(topicName, partID)
 
 	topic.lock.RLock()
@@ -229,7 +230,7 @@ func (w *State) Heartbeat(topicName string, partID, lastOffset int) error {
 // ReleasePartition will send an update for other people to know that we're done with
 // a partition. Returns an error if anything has gone wrong (at which
 // point we can no longer assert we have the lock).
-func (w *State) ReleasePartition(topicName string, partID, lastOffset int) error {
+func (w *Marshaler) ReleasePartition(topicName string, partID, lastOffset int) error {
 	topic := w.getTopicState(topicName, partID)
 
 	topic.lock.RLock()

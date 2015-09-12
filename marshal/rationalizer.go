@@ -17,7 +17,7 @@ import (
 
 // kafkaConsumerChannel creates a consumer that continuously attempts to consume messages from
 // Kafka for the given partition.
-func (w *State) kafkaConsumerChannel(partID int) <-chan message {
+func (w *Marshaler) kafkaConsumerChannel(partID int) <-chan message {
 	out := make(chan message, 1000)
 	go func() {
 		// TODO: Technically we don't have to start at the beginning, we just need to start back
@@ -70,7 +70,7 @@ func (w *State) kafkaConsumerChannel(partID int) <-chan message {
 }
 
 // updateClaim is called whenever we need to adjust a claim structure.
-func (w *State) updateClaim(msg *msgHeartbeat) {
+func (w *Marshaler) updateClaim(msg *msgHeartbeat) {
 	topic := w.getTopicState(msg.Topic, msg.PartID)
 
 	topic.lock.Lock()
@@ -86,7 +86,7 @@ func (w *State) updateClaim(msg *msgHeartbeat) {
 }
 
 // releaseClaim is called whenever someone has released their claim on a partition.
-func (w *State) releaseClaim(msg *msgReleasingPartition) {
+func (w *Marshaler) releaseClaim(msg *msgReleasingPartition) {
 	topic := w.getTopicState(msg.Topic, msg.PartID)
 
 	topic.lock.Lock()
@@ -106,7 +106,7 @@ func (w *State) releaseClaim(msg *msgReleasingPartition) {
 }
 
 // handleClaim is called whenever we see a ClaimPartition message.
-func (w *State) handleClaim(msg *msgClaimingPartition) {
+func (w *Marshaler) handleClaim(msg *msgClaimingPartition) {
 	topic := w.getTopicState(msg.Topic, msg.PartID)
 
 	topic.lock.Lock()
@@ -156,7 +156,7 @@ func (w *State) handleClaim(msg *msgClaimingPartition) {
 
 // rationalize is a goroutine that constantly consumes from a given partition of the marshal
 // topic and makes changes to the world state whenever something happens.
-func (w *State) rationalize(partID int, in <-chan message) { // Might be in over my head.
+func (w *Marshaler) rationalize(partID int, in <-chan message) { // Might be in over my head.
 	for {
 		msg, ok := <-in
 		if !ok {
