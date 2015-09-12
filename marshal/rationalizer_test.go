@@ -21,7 +21,7 @@ func NewWorld() *Marshaler {
 	}
 }
 
-func heartbeat(ts int, cl, gr, t string, id, lo int) *msgHeartbeat {
+func heartbeat(ts int, cl, gr, t string, id int, lo int64) *msgHeartbeat {
 	return &msgHeartbeat{
 		msgBase: msgBase{
 			Time:     ts,
@@ -46,7 +46,7 @@ func claimingPartition(ts int, cl, gr, t string, id int) *msgClaimingPartition {
 	}
 }
 
-func releasingPartition(ts int, cl, gr, t string, id, lo int) *msgReleasingPartition {
+func releasingPartition(ts int, cl, gr, t string, id int, lo int64) *msgReleasingPartition {
 	return &msgReleasingPartition{
 		msgBase: msgBase{
 			Time:     ts,

@@ -61,11 +61,11 @@ func decode(inp []byte) (message, error) {
 		if len(parts) != 7 {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
 		}
-		offset, err := strconv.Atoi(parts[6])
+		offset, err := strconv.ParseInt(parts[6], 10, 0)
 		if err != nil {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
 		}
-		return &msgHeartbeat{msgBase: base, LastOffset: offset}, nil
+		return &msgHeartbeat{msgBase: base, LastOffset: int64(offset)}, nil
 	case "ClaimingPartition":
 		if len(parts) != 6 {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
@@ -75,7 +75,7 @@ func decode(inp []byte) (message, error) {
 		if len(parts) != 7 {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
 		}
-		offset, err := strconv.Atoi(parts[6])
+		offset, err := strconv.ParseInt(parts[6], 10, 0)
 		if err != nil {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
 		}
@@ -84,7 +84,7 @@ func decode(inp []byte) (message, error) {
 		if len(parts) != 7 {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
 		}
-		offset, err := strconv.Atoi(parts[6])
+		offset, err := strconv.ParseInt(parts[6], 10, 0)
 		if err != nil {
 			return nil, fmt.Errorf("Invalid message: [%s]", string(inp))
 		}
@@ -115,7 +115,7 @@ func (m *msgBase) Type() {
 // they're consuming.
 type msgHeartbeat struct {
 	msgBase
-	LastOffset int
+	LastOffset int64
 }
 
 // Encode returns a string representation of the message.
@@ -147,7 +147,7 @@ func (m *msgClaimingPartition) Type() msgType {
 // a partition.
 type msgReleasingPartition struct {
 	msgBase
-	LastOffset int
+	LastOffset int64
 }
 
 // Encode returns a string representation of the message.
@@ -164,7 +164,7 @@ func (m *msgReleasingPartition) Type() msgType {
 // advisory message.
 type msgClaimingMessages struct {
 	msgBase
-	ProposedLastOffset int
+	ProposedLastOffset int64
 }
 
 // Encode returns a string representation of the message.

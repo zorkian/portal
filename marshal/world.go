@@ -208,7 +208,7 @@ func (w *Marshaler) ClaimPartition(topicName string, partID int) bool {
 // Heartbeat will send an update for other people to know that we're still alive and
 // still owning this partition. Returns an error if anything has gone wrong (at which
 // point we can no longer assert we have the lock).
-func (w *Marshaler) Heartbeat(topicName string, partID, lastOffset int) error {
+func (w *Marshaler) Heartbeat(topicName string, partID int, lastOffset int64) error {
 	topic := w.getTopicState(topicName, partID)
 
 	topic.lock.RLock()
@@ -249,7 +249,7 @@ func (w *Marshaler) Heartbeat(topicName string, partID, lastOffset int) error {
 // ReleasePartition will send an update for other people to know that we're done with
 // a partition. Returns an error if anything has gone wrong (at which
 // point we can no longer assert we have the lock).
-func (w *Marshaler) ReleasePartition(topicName string, partID, lastOffset int) error {
+func (w *Marshaler) ReleasePartition(topicName string, partID int, lastOffset int64) error {
 	topic := w.getTopicState(topicName, partID)
 
 	topic.lock.RLock()

@@ -23,7 +23,7 @@ type topicState struct {
 // PartitionClaim contains claim information about a given partition.
 type PartitionClaim struct {
 	LastHeartbeat int64
-	LastOffset    int
+	LastOffset    int64
 	ClientID      string
 	GroupID       string
 

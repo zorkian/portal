@@ -181,5 +181,4 @@ func TestPartitionLifecycleIntegration(t *testing.T) {
 	if cl.LastOffset != 20 {
 		t.Error("LastOffset is not 20")
 	}
-
 }

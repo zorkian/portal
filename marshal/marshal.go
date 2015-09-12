@@ -36,11 +36,15 @@ func init() {
 }
 
 // NewMarshaler connects to a cluster (given broker addresses) and prepares to handle marshalling
-// requests.
-// TODO: It might be nice to make the marshaler agnostic of clients and able to support
-// requests from N clients/groups. For now, though, we require instantiating a new
-// marshaler for every client/group.
+// requests. Given the way this system works, the marshaler has to process all messages in the
+// topic before it's safely able to begin operating. This might take a while.
+//
+// TODO: This should possibly not return until it has actually finished processing and is set
+// up? I.e., all rationalizers report ready.
 func NewMarshaler(clientID, groupID string, brokers []string) (*Marshaler, error) {
+	// TODO: It might be nice to make the marshaler agnostic of clients and able to support
+	// requests from N clients/groups. For now, though, we require instantiating a new
+	// marshaler for every client/group.
 	brokerConf := kafka.NewBrokerConf("PortalMarshal")
 
 	kfka, err := kafka.Dial(brokers, brokerConf)
