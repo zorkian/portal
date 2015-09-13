@@ -4,12 +4,44 @@ import (
 	"testing"
 	"time"
 
+	. "gopkg.in/check.v1"
+
 	"github.com/op/go-logging"
 )
 
 func init() {
 	// TODO: This changes logging for the whole suite. Is that what we want?
 	logging.SetLevel(logging.ERROR, "PortalMarshal")
+}
+
+func Test(t *testing.T) { TestingT(t) }
+
+var _ = Suite(&RationalizerSuite{})
+
+type RationalizerSuite struct {
+	m   *Marshaler
+	out chan message
+	ret chan bool
+}
+
+func (s *RationalizerSuite) SetUpTest(c *C) {
+	s.m = NewWorld()
+	s.out = make(chan message)
+	go s.m.rationalize(0, s.out)
+
+	// Build our return channel and insert it (simulating what the marshal does for
+	// actually trying to claim)
+	s.ret = make(chan bool, 1)
+	topic := s.m.getTopicState("test1", 0)
+	topic.lock.Lock()
+	topic.partitions[0].pendingClaims = append(topic.partitions[0].pendingClaims, s.ret)
+	topic.lock.Unlock()
+}
+
+func (s *RationalizerSuite) TearDownTest(c *C) {
+	s.m.Terminate()
+	close(s.ret)
+	close(s.out)
 }
 
 func NewWorld() *Marshaler {
@@ -59,250 +91,162 @@ func releasingPartition(ts int, cl, gr, t string, id int, lo int64) *msgReleasin
 	}
 }
 
-func TestIsClaimed(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
+func (s *RationalizerSuite) TestIsClaimed(c *C) {
 	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
 	// by the client/group given.
-	out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
+	s.out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// They heartbeated at 1, should be claimed as of 1.
-	ws.ts = 1
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be claimed at ts=0")
-	}
+	s.m.ts = 1
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
 
 	// Should still be claimed immediately after the interval
-	ws.ts = HeartbeatInterval + 2
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be claimed at the heartbeat boundary")
-	}
+	s.m.ts = HeartbeatInterval + 2
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
 
 	// And still claimed right at the last second of the cutoff
-	ws.ts = HeartbeatInterval * 2
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be claimed at double the heartbeat interval")
-	}
+	s.m.ts = HeartbeatInterval * 2
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
 
 	// Should NOT be claimed >2x the heartbeat interval
-	ws.ts = HeartbeatInterval*2 + 1
-	if ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be unclaimed at double the heartbeat interval")
-	}
+	s.m.ts = HeartbeatInterval*2 + 1
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, false)
 }
 
-func TestClaimNotMutable(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
+func (s *RationalizerSuite) TestClaimNotMutable(c *C) {
 	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
 	// by the client/group given.
-	out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
+	s.out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// They heartbeated at 1, should be claimed as of 1.
-	ws.ts = 1
-	cl := ws.GetPartitionClaim("test1", 0)
-	if cl.LastHeartbeat == 0 {
-		t.Error("Expected a claim, didn't get one")
-	}
+	s.m.ts = 1
+	cl := s.m.GetPartitionClaim("test1", 0)
+	c.Assert(cl.LastHeartbeat, Not(Equals), 0)
 
 	// Modify structure, then refetch and make sure it hasn't been mutated
 	cl.ClientID = "invalid"
-	cl2 := ws.GetPartitionClaim("test1", 0)
-	if cl2.LastHeartbeat == 0 {
-		t.Error("Expected a claim, didn't get one")
-	}
-	if cl2.ClientID != "cl" {
-		t.Error("Claim was mutated!")
-	}
+	cl2 := s.m.GetPartitionClaim("test1", 0)
+	c.Assert(cl2.LastHeartbeat, Not(Equals), 0)
+	c.Assert(cl2.ClientID, Equals, "cl")
 }
 
-func TestClaimPartition(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
-	// Build our return channel and insert it (simulating what the marshal does for
-	// actually trying to claim)
-	ret := make(chan bool, 1)
-	topic := ws.getTopicState("test1", 0)
-	topic.lock.Lock()
-	topic.partitions[0].pendingClaims = append(topic.partitions[0].pendingClaims, ret)
-	topic.lock.Unlock()
-
+func (s *RationalizerSuite) TestClaimPartition(c *C) {
 	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
 	// by the client/group given.
-	ws.ts = 30
-	out <- claimingPartition(1, "cl", "gr", "test1", 0)
+	s.m.ts = 30
+	s.out <- claimingPartition(1, "cl", "gr", "test1", 0)
 
 	select {
-	case resp := <-ret:
-		if !resp {
-			t.Error("Failed to claim partition")
-		}
+	case resp := <-s.ret:
+		c.Assert(resp, Equals, true)
 	case <-time.After(1 * time.Second):
-		t.Error("Timed out claiming partition")
+		c.Error("Timed out claiming partition")
 	}
 }
 
-func TestReclaimPartition(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
-	// Build our return channel and insert it (simulating what the marshal does for
-	// actually trying to claim)
-	ret := make(chan bool, 1)
-	topic := ws.getTopicState("test1", 0)
-	topic.lock.Lock()
-	topic.partitions[0].pendingClaims = append(topic.partitions[0].pendingClaims, ret)
-	topic.lock.Unlock()
-
+func (s *RationalizerSuite) TestReclaimPartition(c *C) {
 	// This log is us having the partition (HB) + a CP from someone else + a CP from us,
 	// this should only fire a single 'true' into the out channel
-	ws.ts = 30
-	out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
-	out <- claimingPartition(2, "clother", "gr", "test1", 0)
-	out <- claimingPartition(3, "cl", "gr", "test1", 0)
+	s.m.ts = 30
+	s.out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
+	s.out <- claimingPartition(2, "clother", "gr", "test1", 0)
+	s.out <- claimingPartition(3, "cl", "gr", "test1", 0)
 
 	select {
-	case resp := <-ret:
-		if !resp {
-			t.Error("Failed to claim partition")
-		}
+	case resp := <-s.ret:
+		c.Assert(resp, Equals, true)
 	case <-time.After(1 * time.Second):
-		t.Error("Timed out claiming partition")
+		c.Error("Timed out claiming partition")
 	}
 }
 
-func TestReleaseClaim(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
+func (s *RationalizerSuite) TestReleaseClaim(c *C) {
 	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
 	// by the client/group given.
-	out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
+	s.out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// They heartbeated at 1, should be claimed as of 1.
-	ws.ts = 1
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be claimed at ts=0")
-	}
+	s.m.ts = 1
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
 
 	// Someone else attempts to release the claim, this shouldn't work
-	out <- releasingPartition(20, "cl-bad", "gr", "test1", 0, 5)
+	s.out <- releasingPartition(20, "cl-bad", "gr", "test1", 0, 5)
 	time.Sleep(5 * time.Millisecond)
 
 	// Must be unclaimed, invalid release
-	ws.ts = 25
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test:0 to be claimed at ts=25")
-	}
+	s.m.ts = 25
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
 
 	// Now they release it at position 10
-	out <- releasingPartition(30, "cl", "gr", "test1", 0, 10)
+	s.out <- releasingPartition(30, "cl", "gr", "test1", 0, 10)
 	time.Sleep(5 * time.Millisecond)
 
 	// They released at 30, should be free as of 31
-	ws.ts = 31
-	if ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be unclaimed at ts=31")
-	}
+	s.m.ts = 31
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, false)
 }
 
-func TestClaimHandoff(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
+func (s *RationalizerSuite) TestClaimHandoff(c *C) {
 	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
 	// by the client/group given.
-	out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
+	s.out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// They heartbeated at 1, should be claimed as of 1.
-	ws.ts = 1
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test1:0 to be claimed at ts=0")
-	}
+	s.m.ts = 1
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
 
 	// Now they hand this off to someone else who picks up the heartbeat
-	out <- heartbeat(10, "cl2", "gr", "test1", 0, 10)
+	s.out <- heartbeat(10, "cl2", "gr", "test1", 0, 10)
 	time.Sleep(5 * time.Millisecond)
 
 	// Must be claimed, and claimed by cl2
-	ws.ts = 25
-	if !ws.IsClaimed("test1", 0) {
-		t.Error("Expected test:0 to be claimed at ts=25")
-	}
-	if ws.GetPartitionClaim("test1", 0).ClientID != "cl2" {
-		t.Error("Expected claim by cl2, but wasn't")
-	}
+	s.m.ts = 25
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, true)
+	c.Assert(s.m.GetPartitionClaim("test1", 0).ClientID, Equals, "cl2")
 
 	// Now we change the group ID of our world state (which client's can't do) and validate
 	// that these partitions are NOT claimed
-	ws.ts = 25
-	ws.groupID = "gr2"
-	if ws.IsClaimed("test1", 0) {
-		t.Error("Expected test:0 to be unclaimed at ts=25")
-	}
-	if ws.GetPartitionClaim("test1", 0).ClientID != "" {
-		t.Error("Expected unclaimed, but was")
-	}
+	s.m.ts = 25
+	s.m.groupID = "gr2"
+	c.Assert(s.m.IsClaimed("test1", 0), Equals, false)
+	c.Assert(s.m.GetPartitionClaim("test1", 0).ClientID, Equals, "")
 }
 
-func TestPartitionExtend(t *testing.T) {
-	ws := NewWorld()
-	out := make(chan message)
-	defer close(out)
-	go ws.rationalize(0, out)
-
+func (s *RationalizerSuite) TestPartitionExtend(c *C) {
 	// This log, a single heartbeat at t=0, indicates that this topic/partition are claimed
 	// by the client/group given.
-	out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
+	s.out <- heartbeat(1, "cl", "gr", "test1", 0, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// Ensure len is 1
-	ws.lock.RLock()
-	ws.groups["gr"]["test1"].lock.RLock()
-	if len(ws.groups["gr"]["test1"].partitions) != 1 {
-		t.Error("Expected only 1 partition")
-	}
-	ws.groups["gr"]["test1"].lock.RUnlock()
-	ws.lock.RUnlock()
+	s.m.lock.RLock()
+	s.m.groups["gr"]["test1"].lock.RLock()
+	c.Assert(len(s.m.groups["gr"]["test1"].partitions), Equals, 1)
+	s.m.groups["gr"]["test1"].lock.RUnlock()
+	s.m.lock.RUnlock()
 
 	// Extend by 4
-	out <- heartbeat(2, "cl2", "gr", "test1", 4, 0)
+	s.out <- heartbeat(2, "cl2", "gr", "test1", 4, 0)
 	time.Sleep(5 * time.Millisecond)
 
 	// Ensure len is 5
-	ws.lock.RLock()
-	defer ws.lock.RUnlock()
-	ws.groups["gr"]["test1"].lock.RLock()
-	defer ws.groups["gr"]["test1"].lock.RUnlock()
-
-	if len(ws.groups["gr"]["test1"].partitions) != 5 {
-		t.Error("Expected only 5 partitions")
-	}
+	s.m.lock.RLock()
+	defer s.m.lock.RUnlock()
+	s.m.groups["gr"]["test1"].lock.RLock()
+	defer s.m.groups["gr"]["test1"].lock.RUnlock()
+	c.Assert(len(s.m.groups["gr"]["test1"].partitions), Equals, 5)
 
 	// Ensure 0 and 4 are claimed by us
-	p1 := ws.groups["gr"]["test1"].partitions[0]
-	p2 := ws.groups["gr"]["test1"].partitions[4]
-	if p1.ClientID != "cl" || p1.GroupID != "gr" || p1.LastHeartbeat != 1 ||
-		p2.ClientID != "cl2" || p2.GroupID != "gr" || p2.LastHeartbeat != 2 {
-		t.Error("Partition contents unexpected")
-	}
+	p1 := s.m.groups["gr"]["test1"].partitions[0]
+	c.Assert(p1.ClientID, Equals, "cl")
+	c.Assert(p1.GroupID, Equals, "gr")
+	c.Assert(p1.LastHeartbeat, Equals, int64(1))
+	p2 := s.m.groups["gr"]["test1"].partitions[4]
+	c.Assert(p2.ClientID, Equals, "cl2")
+	c.Assert(p2.GroupID, Equals, "gr")
+	c.Assert(p2.LastHeartbeat, Equals, int64(2))
 }

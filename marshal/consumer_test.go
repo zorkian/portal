@@ -2,152 +2,100 @@ package marshal
 
 import (
 	"math/rand"
-	"testing"
 	"time"
+
+	. "gopkg.in/check.v1"
 
 	"github.com/optiopay/kafka/kafkatest"
 	"github.com/optiopay/kafka/proto"
 )
 
-func Produce(m *Marshaler, topicName string, partID int, msgs ...string) (int64, error) {
-	var protos []*proto.Message
-	for _, msg := range msgs {
-		protos = append(protos, &proto.Message{Value: []byte(msg)})
-	}
+var _ = Suite(&ConsumerSuite{})
 
-	return m.producer.Produce(topicName, int32(partID), protos...)
+type ConsumerSuite struct {
+	c  *C
+	s  *kafkatest.Server
+	m  *Marshaler
+	cn *Consumer
 }
 
-func NewTestConsumer(topicName string, behavior ConsumerBehavior) (
-	*kafkatest.Server, *Marshaler, *Consumer) {
-	srv := StartServer()
+func (s *ConsumerSuite) SetUpTest(c *C) {
+	s.c = c
+	s.s = StartServer()
 
-	m, err := NewMarshaler("cl", "gr", []string{srv.Addr()})
-	if err != nil {
-		return nil, nil, nil
-	}
+	var err error
+	s.m, err = NewMarshaler("cl", "gr", []string{s.s.Addr()})
+	c.Assert(err, IsNil)
 
-	return srv, m, &Consumer{
-		marshal:    m,
-		topic:      topicName,
-		partitions: m.Partitions(topicName),
-		behavior:   behavior,
+	s.cn = &Consumer{
+		marshal:    s.m,
+		topic:      "test16",
+		partitions: s.m.Partitions("test16"),
+		behavior:   CbAggressive,
 		rand:       rand.New(rand.NewSource(time.Now().UnixNano())),
 		claims:     make(map[int]*consumerClaim),
 	}
 }
 
-func TestNewConsumer(t *testing.T) {
-	srv := StartServer()
-
-	m, err := NewMarshaler("cl", "gr", []string{srv.Addr()})
-	if err != nil {
-		t.Errorf("New failed: %s", err)
+func (s *ConsumerSuite) Produce(topicName string, partID int, msgs ...string) int64 {
+	var protos []*proto.Message
+	for _, msg := range msgs {
+		protos = append(protos, &proto.Message{Value: []byte(msg)})
 	}
-	defer m.Terminate()
+	offset, err := s.m.producer.Produce(topicName, int32(partID), protos...)
+	s.c.Assert(err, IsNil)
+	return offset
+}
 
-	c, err := NewConsumer(m, "test1", CbAggressive)
-	if err != nil {
-		t.Errorf("Failed to create: %s", err)
-	}
-	defer c.Terminate()
+func (s *ConsumerSuite) TestNewConsumer(c *C) {
+	cn, err := NewConsumer(s.m, "test1", CbAggressive)
+	c.Assert(err, IsNil)
+	defer cn.Terminate()
 
 	// A new consumer will immediately start to claim partitions, so let's give it a
 	// second and then see if it has
 	time.Sleep(500 * time.Millisecond)
-	if m.GetPartitionClaim("test1", 0).LastHeartbeat == 0 {
-		t.Error("Partition didn't get claimed")
-	}
+	c.Assert(s.m.GetPartitionClaim("test1", 0).LastHeartbeat, Not(Equals), int64(0))
 
 	// Test basic consumption
-	_, err = Produce(m, "test1", 0, "m1", "m2", "m3")
-	if err != nil {
-		t.Errorf("Failed to produce: %s", err)
-	}
-
-	m1 := c.Consume()
-	if string(m1) != "m1" {
-		t.Errorf("Expected m1, got: %s", m1)
-	}
-
-	m2 := c.Consume()
-	if string(m2) != "m2" {
-		t.Errorf("Expected m2, got: %s", m2)
-	}
-
-	m3 := c.Consume()
-	if string(m3) != "m3" {
-		t.Errorf("Expected m3, got: %s", m3)
-	}
+	s.Produce("test1", 0, "m1", "m2", "m3")
+	c.Assert(cn.Consume(), DeepEquals, []byte("m1"))
+	c.Assert(cn.Consume(), DeepEquals, []byte("m2"))
+	c.Assert(cn.Consume(), DeepEquals, []byte("m3"))
 
 	// TODO: flesh out test, can create a second consumer and then see if it gets any
 	// partitions, etc.
 	// lots of things can be tested.
 }
 
-func TestTryClaimPartition(t *testing.T) {
-	_, m, c := NewTestConsumer("test1", CbAggressive)
-	defer c.Terminate()
-	defer m.Terminate()
-
-	if !c.tryClaimPartition(0) {
-		t.Error("Failed to claim partition 0")
-	}
-	if c.tryClaimPartition(0) {
-		t.Error("Succeeded to claim partition 0")
-	}
+func (s *ConsumerSuite) TestTryClaimPartition(c *C) {
+	// Should work
+	c.Assert(s.cn.tryClaimPartition(0), Equals, true)
+	// Should fail (can't claim a second time)
+	c.Assert(s.cn.tryClaimPartition(0), Equals, false)
 }
 
-func TestOffsetUpdates(t *testing.T) {
-	_, m, c := NewTestConsumer("test1", CbAggressive)
-	defer c.Terminate()
-	defer m.Terminate()
-
-	if !c.tryClaimPartition(0) {
-		t.Error("Failed to claim partition 0")
-	}
-
-	err := c.updateOffsets()
-	if err != nil {
-		t.Errorf("Failed to update offests: %s", err)
-	}
-
-	o, err := Produce(m, "test1", 0, "m1", "m2", "m3")
-	if err != nil {
-		t.Errorf("Failed to produce: %s", err)
-	}
-	if o != 2 {
-		t.Errorf("Expected offset 2, got %d", o)
-	}
-
-	err = c.updateOffsets()
-	if err != nil {
-		t.Errorf("Failed to update offests: %s", err)
-	}
-
-	if c.claims[0].offsetLatest != 3 {
-		t.Errorf("Latest offest should be 3, got %d", c.claims[0].offsetLatest)
-	}
+func (s *ConsumerSuite) TestOffsetUpdates(c *C) {
+	// Claim partition 0, update our offsets, produce, update offsets again, ensure everything
+	// is consistent (offsets got updated, etc)
+	c.Assert(s.cn.tryClaimPartition(0), Equals, true)
+	c.Assert(s.cn.updateOffsets(), IsNil)
+	c.Assert(s.Produce("test16", 0, "m1", "m2", "m3"), Equals, int64(2))
+	c.Assert(s.cn.updateOffsets(), IsNil)
+	c.Assert(s.cn.claims[0].offsetLatest, Equals, int64(3))
 }
 
-func TestAggressiveClaim(t *testing.T) {
-	_, m, c := NewTestConsumer("test16", CbAggressive)
-	defer c.Terminate()
-	defer m.Terminate()
-
-	c.claimPartitions()
-	if c.GetCurrentLoad() != 16 {
-		t.Error("Did not claim 16 partitions")
-	}
+func (s *ConsumerSuite) TestAggressiveClaim(c *C) {
+	// Ensure aggressive mode claims all partitions in a single call to claim
+	c.Assert(s.cn.GetCurrentLoad(), Equals, 0)
+	s.cn.claimPartitions()
+	c.Assert(s.cn.GetCurrentLoad(), Equals, 16)
 }
 
-func TestBalancedClaim(t *testing.T) {
-	_, m, c := NewTestConsumer("test16", CbBalanced)
-	defer c.Terminate()
-	defer m.Terminate()
-
-	c.claimPartitions()
-	if c.GetCurrentLoad() != 1 {
-		t.Error("Did not claim 1 partition")
-	}
+func (s *ConsumerSuite) TestBalancedClaim(c *C) {
+	// Ensure balanced mode only claims one partition
+	s.cn.behavior = CbBalanced
+	c.Assert(s.cn.GetCurrentLoad(), Equals, 0)
+	s.cn.claimPartitions()
+	c.Assert(s.cn.GetCurrentLoad(), Equals, 1)
 }

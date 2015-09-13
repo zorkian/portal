@@ -121,8 +121,8 @@ func NewConsumer(marshal *Marshaler, topicName string,
 
 // updateOffsets will update the offsets of any partitions that we claim.
 func (c *Consumer) updateOffsets() error {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	for partID, claim := range c.claims {
 		oEarly, oLate, _, err := c.marshal.GetPartitionOffsets(c.topic, partID)

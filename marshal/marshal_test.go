@@ -1,11 +1,34 @@
 package marshal
 
 import (
-	"testing"
 	"time"
+
+	. "gopkg.in/check.v1"
 
 	"github.com/optiopay/kafka/kafkatest"
 )
+
+var _ = Suite(&MarshalSuite{})
+
+type MarshalSuite struct {
+	s *kafkatest.Server
+	m *Marshaler
+}
+
+func (s *MarshalSuite) SetUpTest(c *C) {
+	s.s = StartServer()
+
+	var err error
+	s.m, err = NewMarshaler("cl", "gr", []string{s.s.Addr()})
+	if err != nil {
+		c.Errorf("New Marshaler failed: %s", err)
+	}
+}
+
+func (s *MarshalSuite) TearDownTest(c *C) {
+	s.m.Terminate()
+	s.s.Close()
+}
 
 func MakeTopic(srv *kafkatest.Server, topic string, numPartitions int) {
 	for i := 0; i < numPartitions; i++ {
@@ -22,163 +45,107 @@ func StartServer() *kafkatest.Server {
 	return srv
 }
 
-func TestNewMarshaler(t *testing.T) {
-	srv := StartServer()
-
-	m, err := NewMarshaler("cl", "gr", []string{srv.Addr()})
-	if err != nil {
-		t.Errorf("New failed: %s", err)
-	}
-	defer m.Terminate()
-
-	ct := m.Partitions(MarshalTopic)
-	if ct != 4 {
-		t.Error("Expected 4 partitions got", ct)
-	}
-
-	ct = m.Partitions("test1")
-	if ct != 1 {
-		t.Error("Expected 1 partitions got", ct)
-	}
-
-	ct = m.Partitions("test16")
-	if ct != 16 {
-		t.Error("Expected 16 partitions got", ct)
-	}
-
-	ct = m.Partitions("unknown")
-	if ct != 0 {
-		t.Error("Expected 0 partitions got", ct)
-	}
+func (s *MarshalSuite) TestNewMarshaler(c *C) {
+	c.Assert(s.m.Partitions(MarshalTopic), Equals, 4)
+	c.Assert(s.m.Partitions("test1"), Equals, 1)
+	c.Assert(s.m.Partitions("test16"), Equals, 16)
+	c.Assert(s.m.Partitions("unknown"), Equals, 0)
 }
 
 // This is a full integration test of claiming including writing to Kafka via the marshaler
 // and waiting for responses
-func TestClaimPartitionIntegration(t *testing.T) {
-	srv := StartServer()
-
-	m, err := NewMarshaler("cl", "gr", []string{srv.Addr()})
-	if err != nil {
-		t.Errorf("New failed: %s", err)
-	}
-	defer m.Terminate()
-
+func (s *MarshalSuite) TestClaimPartitionIntegration(c *C) {
 	resp := make(chan bool)
 	go func() {
-		resp <- m.ClaimPartition("test1", 0) // true
-		resp <- m.ClaimPartition("test1", 0) // true (no-op)
-		m.lock.Lock()
-		m.clientID = "cl-other"
-		m.lock.Unlock()
-		resp <- m.ClaimPartition("test1", 0) // false (collission)
-		resp <- m.ClaimPartition("test1", 1) // true (new client)
+		resp <- s.m.ClaimPartition("test1", 0) // true
+		resp <- s.m.ClaimPartition("test1", 0) // true (no-op)
+		s.m.lock.Lock()
+		s.m.clientID = "cl-other"
+		s.m.lock.Unlock()
+		resp <- s.m.ClaimPartition("test1", 0) // false (collission)
+		resp <- s.m.ClaimPartition("test1", 1) // true (new client)
 	}()
 
 	select {
 	case out := <-resp:
-		if !out {
-			t.Error("Failed to claim partition")
-		}
+		c.Assert(out, Equals, true)
 	case <-time.After(1 * time.Second):
-		t.Error("Timed out claiming partition")
+		c.Error("Timed out claiming partition")
 	}
 
 	select {
 	case out := <-resp:
-		if !out {
-			t.Error("Failed to reclaim partition")
-		}
+		c.Assert(out, Equals, true)
 	case <-time.After(1 * time.Second):
-		t.Error("Timed out claiming partition")
+		c.Error("Timed out claiming partition")
 	}
 
 	select {
 	case out := <-resp:
-		if out {
-			t.Error("Failed to collide with partition claim")
-		}
+		c.Assert(out, Equals, false)
 	case <-time.After(1 * time.Second):
-		t.Error("Timed out claiming partition")
+		c.Error("Timed out claiming partition")
 	}
 
 	select {
 	case out := <-resp:
-		if !out {
-			t.Error("Failed to claim partition")
-		}
+		c.Assert(out, Equals, true)
 	case <-time.After(1 * time.Second):
-		t.Error("Timed out claiming partition")
+		c.Error("Timed out claiming partition")
 	}
 }
 
 // This is a full integration test of a claim, heartbeat, and release cycle
-func TestPartitionLifecycleIntegration(t *testing.T) {
-	srv := StartServer()
-
-	m, err := NewMarshaler("cl", "gr", []string{srv.Addr()})
-	if err != nil {
-		t.Errorf("New failed: %s", err)
-	}
-	defer m.Terminate()
-
+func (s *MarshalSuite) TestPartitionLifecycleIntegration(c *C) {
 	// Claim partition (this is synchronous, will only return when)
 	// it has succeeded
-	resp := m.ClaimPartition("test1", 0)
-	if !resp {
-		t.Error("Failed to claim partition")
-	}
+	c.Assert(s.m.ClaimPartition("test1", 0), Equals, true)
 
 	// Ensure we have claimed it
-	cl := m.GetPartitionClaim("test1", 0)
+	cl := s.m.GetPartitionClaim("test1", 0)
 	if cl.LastHeartbeat <= 0 || cl.ClientID != "cl" || cl.GroupID != "gr" {
-		t.Error("PartitionClaim values unexpected")
+		c.Error("PartitionClaim values unexpected")
 	}
 	if cl.LastOffset != 0 {
-		t.Error("LastOffset is not 0")
+		c.Error("LastOffset is not 0")
 	}
 
 	// Now heartbeat on it to update the last offset
-	err = m.Heartbeat("test1", 0, 10)
-	if err != nil {
-		t.Error("Failed to Heartbeat for partition")
-	}
+	c.Assert(s.m.Heartbeat("test1", 0, 10), IsNil)
 
 	// Now we have to wait for the rationalizer to update, so let's pause
 	time.Sleep(500 * time.Millisecond)
 
 	// Get the claim again, validate it's updated
-	cl = m.GetPartitionClaim("test1", 0)
+	cl = s.m.GetPartitionClaim("test1", 0)
 	if cl.LastHeartbeat <= 0 || cl.ClientID != "cl" || cl.GroupID != "gr" {
-		t.Error("PartitionClaim values unexpected")
+		c.Error("PartitionClaim values unexpected")
 	}
 	if cl.LastOffset != 10 {
-		t.Error("LastOffset is not 10")
+		c.Error("LastOffset is not 10")
 	}
 
 	// Release
-	err = m.ReleasePartition("test1", 0, 20)
-	if err != nil {
-		t.Error("Failed to Release for partition")
-	}
+	c.Assert(s.m.ReleasePartition("test1", 0, 20), IsNil)
 
 	// Now we have to wait for the rationalizer to update, so let's pause
 	time.Sleep(500 * time.Millisecond)
 
 	// Get the claim again, validate it's empty
-	cl = m.GetPartitionClaim("test1", 0)
+	cl = s.m.GetPartitionClaim("test1", 0)
 	if cl.LastHeartbeat > 0 || cl.ClientID != "" || cl.GroupID != "" {
-		t.Error("PartitionClaim values unexpected %s", cl)
+		c.Errorf("PartitionClaim values unexpected %s", cl)
 	}
 	if cl.LastOffset != 0 {
-		t.Error("LastOffset is not 20")
+		c.Error("LastOffset is not 20")
 	}
 
 	// Get the last known claim data
-	cl = m.GetLastPartitionClaim("test1", 0)
+	cl = s.m.GetLastPartitionClaim("test1", 0)
 	if cl.LastHeartbeat > 0 || cl.ClientID != "cl" || cl.GroupID != "gr" {
-		t.Error("PartitionClaim values unexpected %s", cl)
+		c.Errorf("PartitionClaim values unexpected %s", cl)
 	}
 	if cl.LastOffset != 20 {
-		t.Error("LastOffset is not 20")
+		c.Error("LastOffset is not 20")
 	}
 }
