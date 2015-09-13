@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/op/go-logging"
 	"github.com/optiopay/kafka"
 )
 
@@ -28,12 +27,6 @@ const (
 	// as it is critical to coordination.
 	HeartbeatInterval = 60 // Measured in seconds.
 )
-
-var log = logging.MustGetLogger("PortalMarshal")
-
-func init() {
-	logging.SetLevel(logging.WARNING, "PortalMarshal")
-}
 
 // NewMarshaler connects to a cluster (given broker addresses) and prepares to handle marshalling
 // requests. Given the way this system works, the marshaler has to process all messages in the

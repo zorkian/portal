@@ -10,7 +10,7 @@ import (
 )
 
 func Produce(m *Marshaler, topicName string, partID int, msgs ...string) (int64, error) {
-	protos := make([]*proto.Message, 0)
+	var protos []*proto.Message
 	for _, msg := range msgs {
 		protos = append(protos, &proto.Message{Value: []byte(msg)})
 	}

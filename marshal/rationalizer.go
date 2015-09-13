@@ -38,7 +38,7 @@ func (w *Marshaler) kafkaConsumerChannel(partID int) <-chan message {
 		// Consume messages forever, or until told to quit.
 		for {
 			if atomic.LoadInt32(w.quit) == 1 {
-				log.Debug("rationalize[%d]: terminating.", partID)
+				log.Debugf("rationalize[%d]: terminating.", partID)
 				close(out)
 				return
 			}
@@ -58,11 +58,11 @@ func (w *Marshaler) kafkaConsumerChannel(partID int) <-chan message {
 				// one version of this software has a bug that writes invalid messages, it could
 				// be doing things we don't anticipate. Of course, crashing all consumers
 				// reading that partition is also bad.
-				log.Error("rationalize[%d]: %s", partID, err)
+				log.Errorf("rationalize[%d]: %s", partID, err)
 				continue
 			}
 
-			log.Debug("Got message at offset %d: [%s]", msgb.Offset, msg.Encode())
+			log.Debugf("Got message at offset %d: [%s]", msgb.Offset, msg.Encode())
 			out <- msg
 		}
 	}()
@@ -95,7 +95,7 @@ func (w *Marshaler) releaseClaim(msg *msgReleasingPartition) {
 	// The partition must be claimed by the person releasing it
 	if topic.partitions[msg.PartID].ClientID != msg.ClientID ||
 		topic.partitions[msg.PartID].GroupID != msg.GroupID {
-		log.Warning("ReleasePartition message from client that doesn't own it. Dropping.")
+		log.Warningf("ReleasePartition message from client that doesn't own it. Dropping.")
 		return
 	}
 
@@ -160,10 +160,10 @@ func (w *Marshaler) rationalize(partID int, in <-chan message) { // Might be in 
 	for {
 		msg, ok := <-in
 		if !ok {
-			log.Debug("rationalize[%d]: channel closed.", partID)
+			log.Debugf("rationalize[%d]: channel closed.", partID)
 			return
 		}
-		log.Debug("rationalize[%d]: %s", partID, msg.Encode())
+		log.Debugf("rationalize[%d]: %s", partID, msg.Encode())
 
 		switch msg.Type() {
 		case msgTypeHeartbeat:

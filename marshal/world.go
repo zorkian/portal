@@ -190,7 +190,7 @@ func (w *Marshaler) ClaimPartition(topicName string, partID int) bool {
 			topic.partitions[partID].ClientID == w.clientID {
 			return true
 		}
-		log.Warning("Attempt to claim already claimed partition.")
+		log.Warningf("Attempt to claim already claimed partition.")
 		return false
 	}
 
@@ -217,7 +217,7 @@ func (w *Marshaler) ClaimPartition(topicName string, partID int) bool {
 	if err != nil {
 		// If we failed to produce, this is probably serious so we should undo the work
 		// we did and then return failure
-		log.Error("Failed to produce to Kafka: %s", err)
+		log.Errorf("Failed to produce to Kafka: %s", err)
 		return false
 	}
 

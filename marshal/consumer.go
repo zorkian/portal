@@ -66,13 +66,13 @@ func (c *consumerClaim) isClaimed() bool {
 func (c *consumerClaim) messagePump() {
 	for {
 		if !c.isClaimed() {
-			log.Info("%s:%d no longer claimed, pump exiting.", c.topic, c.partID)
+			log.Infof("%s:%d no longer claimed, pump exiting.", c.topic, c.partID)
 			return
 		}
 
 		msg, err := c.consumer.Consume()
 		if err != nil {
-			log.Error("%s:%d error consuming: %s", c.topic, c.partID, err)
+			log.Errorf("%s:%d error consuming: %s", c.topic, c.partID, err)
 			// TODO: What can we do here? Probably if we got an error it's just
 			// a transient thing, so let's have some backoff here?
 			continue
@@ -127,7 +127,7 @@ func (c *Consumer) updateOffsets() error {
 	for partID, claim := range c.claims {
 		oEarly, oLate, _, err := c.marshal.GetPartitionOffsets(c.topic, partID)
 		if err != nil {
-			log.Error("Failed to get offsets for %s:%d: %s", c.topic, partID, err)
+			log.Errorf("Failed to get offsets for %s:%d: %s", c.topic, partID, err)
 			return err
 		}
 
@@ -155,7 +155,7 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	// Get all available offset information
 	oEarly, oLate, oCur, err := c.marshal.GetPartitionOffsets(c.topic, partID)
 	if err != nil {
-		log.Error("Failed to get offsets for %s:%d: %s", c.topic, partID, err)
+		log.Errorf("Failed to get offsets for %s:%d: %s", c.topic, partID, err)
 		return false
 	}
 
@@ -172,16 +172,16 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	atomic.StoreInt32(claim.claimed, 1)
 
 	// Now try to actually claim it, this can block a while
-	log.Info("Consumer attempting to claim: %s:%d", c.topic, partID)
+	log.Infof("Consumer attempting to claim: %s:%d", c.topic, partID)
 	if !c.marshal.ClaimPartition(c.topic, partID) {
-		log.Info("Consumer failed to claim: %s:%d", c.topic, partID)
+		log.Infof("Consumer failed to claim: %s:%d", c.topic, partID)
 		return false
 	}
 
 	// Of course, if the current offset is greater than the earliest, we must reset
 	// to the earliest known
 	if claim.offsetCurrent < claim.offsetEarliest {
-		log.Warning("Consumer fast-forwarding %s:%d: from %d to %d",
+		log.Warningf("Consumer fast-forwarding %s:%d: from %d to %d",
 			c.topic, partID, claim.offsetCurrent, claim.offsetEarliest)
 		claim.offsetCurrent = claim.offsetEarliest
 	}
@@ -189,7 +189,7 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	// Since it's claimed, we now want to heartbeat with the last seen offset
 	err = c.marshal.Heartbeat(c.topic, partID, claim.offsetCurrent)
 	if err != nil {
-		log.Error("Consumer failed to heartbeat: %s:%d", c.topic, partID)
+		log.Errorf("Consumer failed to heartbeat: %s:%d", c.topic, partID)
 	}
 
 	// Set up Kafka consumer
@@ -197,7 +197,7 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	consumerConf.StartOffset = claim.offsetCurrent
 	kafkaConsumer, err := c.marshal.kafka.Consumer(consumerConf)
 	if err != nil {
-		log.Error("Consumer failed to create Kafka Consumer: %s:%d got %s",
+		log.Errorf("Consumer failed to create Kafka Consumer: %s:%d got %s",
 			c.topic, partID, err)
 		// TODO: There is an optimization here where we could release the partition.
 		// As it stands, we're not doing anything,
@@ -209,7 +209,7 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	go claim.messagePump()
 
 	// Totally done, update our internal structures
-	log.Info("Consumer claimed: %s:%d at offset %d (is %d behind)",
+	log.Infof("Consumer claimed: %s:%d at offset %d (is %d behind)",
 		c.topic, partID, claim.offsetCurrent, claim.offsetLatest)
 
 	// Finally overwrite our structure pointer (state is committed to ourselves)
@@ -280,10 +280,10 @@ func (c *Consumer) Terminate() {
 		if claim.isClaimed() {
 			err := c.marshal.ReleasePartition(c.topic, partID, claim.offsetCurrent)
 			if err == nil {
-				log.Info("Consumer termination: released %s:%d at %d",
+				log.Infof("Consumer termination: released %s:%d at %d",
 					c.topic, partID, claim.offsetCurrent)
 			} else {
-				log.Error("Consumer termination: failed to release %s:%d: %s",
+				log.Errorf("Consumer termination: failed to release %s:%d: %s",
 					c.topic, partID, err)
 			}
 		}
