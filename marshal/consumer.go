@@ -55,17 +55,11 @@ type consumerClaim struct {
 	offsetLatest int64
 }
 
-// isClaimed is a helper function, returns true/false on whether or not the partition
-// claim is active. (Thread safe.)
-func (c *consumerClaim) isClaimed() bool {
-	return atomic.LoadInt32(c.claimed) == 1
-}
-
 // messagePump continuously pulls message from Kafka for this partition and makes them
 // available for consumption.
 func (c *consumerClaim) messagePump() {
 	for {
-		if !c.isClaimed() {
+		if atomic.LoadInt32(c.claimed) != 1 {
 			log.Infof("%s:%d no longer claimed, pump exiting.", c.topic, c.partID)
 			return
 		}
@@ -191,6 +185,7 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	if err != nil {
 		log.Errorf("Consumer failed to heartbeat: %s:%d", c.topic, partID)
 	}
+	claim.lastHeartbeat = time.Now().Unix()
 
 	// Set up Kafka consumer
 	consumerConf := kafka.NewConsumerConf(c.topic, int32(partID))
@@ -215,23 +210,26 @@ func (c *Consumer) tryClaimPartition(partID int) bool {
 	// Finally overwrite our structure pointer (state is committed to ourselves)
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.claims[partID] = claim
+	if c.claims != nil {
+		// Can be nil when we're terminating
+		c.claims[partID] = claim
+	}
 	return true
 }
 
 // claimPartitions actually attempts to claim partitions. If the current consumer is
-// set on aggressive, this will try to claim ALL partitions that are free.
+// set on aggressive, this will try to claim ALL partitions that are free. Balanced mode
+// will claim a single partition.
 func (c *Consumer) claimPartitions() {
 	offset := rand.Intn(c.partitions)
 	for i := 0; i < c.partitions; i++ {
 		partID := (i + offset) % c.partitions
 
+		// If it's present in the structure, we assert that it's claimed by us
 		c.lock.RLock()
 		if _, ok := c.claims[partID]; ok {
-			if c.claims[partID].isClaimed() {
-				c.lock.RUnlock()
-				continue
-			}
+			c.lock.RUnlock()
+			continue
 		}
 		c.lock.RUnlock()
 
@@ -251,6 +249,14 @@ func (c *Consumer) claimPartitions() {
 // ones (or releasing ones).
 func (c *Consumer) manageClaims() {
 	for {
+		// See if consumer is alive (hasn't been terminated)
+		c.lock.RLock()
+		if c.claims == nil {
+			c.lock.RUnlock()
+			return
+		}
+		c.lock.RUnlock()
+
 		// Step 1: For partitions we have, if they're behind increment the behind count
 		// so we can possibly release them.
 		// Determine our overall health (i.e. how far behind we are, and whether or not
@@ -273,21 +279,23 @@ func (c *Consumer) manageClaims() {
 // to begin consuming. (If you do not call this method before exiting, things will still
 // work, but more slowly.)
 func (c *Consumer) Terminate() {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	for partID, claim := range c.claims {
-		if claim.isClaimed() {
-			err := c.marshal.ReleasePartition(c.topic, partID, claim.offsetCurrent)
-			if err == nil {
-				log.Infof("Consumer termination: released %s:%d at %d",
-					c.topic, partID, claim.offsetCurrent)
-			} else {
-				log.Errorf("Consumer termination: failed to release %s:%d: %s",
-					c.topic, partID, err)
-			}
+		atomic.StoreInt32(claim.claimed, 0) // Terminates the pump.
+		err := c.marshal.ReleasePartition(c.topic, partID, claim.offsetCurrent)
+		if err == nil {
+			log.Infof("Consumer termination: released %s:%d at %d",
+				c.topic, partID, claim.offsetCurrent)
+		} else {
+			log.Errorf("Consumer termination: failed to release %s:%d: %s",
+				c.topic, partID, err)
 		}
 	}
+
+	// Remove the map, so we can't operate anymore
+	c.claims = nil
 }
 
 // GetCurrentLag returns the number of messages that this consumer is lagging by. Note that
@@ -303,13 +311,10 @@ func (c *Consumer) GetCurrentLag() int {
 // like a load average in Unix systems: the numbers are kind of related to how much work
 // the system is doing, but by itself they don't tell you much.
 func (c *Consumer) GetCurrentLoad() int {
-	claimed := 0
-	for _, claim := range c.claims {
-		if claim.isClaimed() {
-			claimed++
-		}
-	}
-	return claimed
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	return len(c.claims)
 }
 
 // Consume returns the next available message from the topic. If no messages are available,
@@ -317,17 +322,14 @@ func (c *Consumer) GetCurrentLoad() int {
 func (c *Consumer) Consume() []byte {
 	// TODO: This is almost certainly a slow implementation as we have to scan everything
 	// every time.
-	// TODO: This implementation also can lead to queue starvation since we start at the
-	// front every time.
 	for {
 		var msg *proto.Message
 
+		// TODO: This implementation also can lead to queue starvation since we start at the
+		// front every time.
+		// TODO: Rethink this locking. It really is confusing...
 		c.lock.RLock()
 		for _, claim := range c.claims {
-			if !claim.isClaimed() {
-				continue
-			}
-
 			select {
 			case msg = <-claim.messages:
 				break
@@ -337,6 +339,7 @@ func (c *Consumer) Consume() []byte {
 		}
 		c.lock.RUnlock()
 
+		// TODO: This is braindead.
 		if msg == nil {
 			time.Sleep(50 * time.Millisecond)
 			continue
@@ -348,6 +351,26 @@ func (c *Consumer) Consume() []byte {
 		// TODO: There is a trap here, this is actually probably a bad design in that
 		// the consumer has its own idea of "claim" which in theory mirrors what the
 		// marshaler has... but there's no guarantee
+		// Of course for the ALO consumer, that's probably OK. It's just a bad code design
+		// I think.
+
+		c.lock.Lock()
+		claim := c.claims[int(msg.Partition)]
+		now := time.Now().Unix()
+		if claim.lastHeartbeat <= (now - HeartbeatInterval) {
+			// TODO: Should offset be current message? or next point? what is it elsewhere?
+			// Let's prefer not to have off-by-one errors...
+			claim.offsetCurrent = msg.Offset
+			claim.lastHeartbeat = now
+			// Do this in a goroutine so as not to block the consumption
+			go func() {
+				// Don't use 'claim' here, as this will definitely run outside of the lock
+				// since it's async...
+				log.Debugf("Need to heartbeat for %s:%d.", claim.topic, claim.partID)
+				c.marshal.Heartbeat(msg.Topic, int(msg.Partition), msg.Offset)
+			}()
+		}
+		c.lock.Unlock()
 
 		return msg.Value
 	}
